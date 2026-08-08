@@ -144,6 +144,24 @@ function creativeDocument(authorId, companyId) {
   };
 }
 
+function businessPlanDocument(authorId, companyId) {
+  const now = new Date().toISOString();
+  return {
+    title: 'Business plan tenant-isolation test',
+    summary: 'Rules smoke test',
+    content: 'Private business plan content.',
+    status: 'draft',
+    tags: [],
+    links: [],
+    contentRevision: 0,
+    blockMap: [],
+    createdAt: now,
+    updatedAt: now,
+    authorId,
+    companyId,
+  };
+}
+
 async function writeCreative(path, token, creative, expectedStatus = 200) {
   return request(
     firestoreUrl(path),
@@ -161,6 +179,19 @@ const member = await createActor('member', 'company-a', 'member');
 const outsider = await createActor('outsider', 'company-b', 'admin');
 const creativePath = `creativeItems/creative-${runId}`;
 const creative = creativeDocument(member.uid, 'company-a');
+const businessPlanPath = `businessPlans/plan-${runId}`;
+const businessPlan = businessPlanDocument(member.uid, 'company-a');
+
+await request(
+  firestoreUrl(businessPlanPath),
+  {
+    method: 'PATCH',
+    headers: authHeaders(member.token),
+    body: JSON.stringify(toFirestoreDocument(businessPlan)),
+  },
+);
+await request(firestoreUrl(businessPlanPath), { headers: authHeaders(member.token) });
+await request(firestoreUrl(businessPlanPath), { headers: authHeaders(outsider.token) }, 403);
 
 await request(
   firestoreUrl(`users/${member.uid}`),

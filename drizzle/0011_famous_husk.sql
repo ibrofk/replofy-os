@@ -126,6 +126,8 @@ CREATE UNIQUE INDEX "context_source_workspace_source_key_uidx" ON "context_sourc
 --> statement-breakpoint
 CREATE UNIQUE INDEX "context_source_workspace_id_id_uidx" ON "context_source" USING btree ("workspace_id","id");
 --> statement-breakpoint
+CREATE UNIQUE INDEX "context_source_folder_workspace_id_id_uidx" ON "context_source_folder" USING btree ("workspace_id","id");
+--> statement-breakpoint
 CREATE UNIQUE INDEX "context_source_folder_workspace_name_uidx" ON "context_source_folder" USING btree ("workspace_id","name");
 --> statement-breakpoint
 CREATE UNIQUE INDEX "context_source_item_workspace_id_id_uidx" ON "context_source_item" USING btree ("workspace_id","id");

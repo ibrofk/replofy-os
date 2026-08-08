@@ -106,6 +106,14 @@ service cloud.firestore {
         );
     }
 
+    function canAccessBusinessPlanResource() {
+      return isAuthenticated() &&
+        (
+          (('authorId' in resource.data) && resource.data.authorId == request.auth.uid) ||
+          (('companyId' in resource.data) && resource.data.companyId != null && isCompanyMember(resource.data.companyId))
+        );
+    }
+
     function isValidBusinessPlanEditingSession(planId) {
       return hasOnlyAllowedFields(['sessionId', 'userId', 'displayName', 'color', 'planId', 'activeBlockId', 'createdAt', 'updatedAt']) &&
              request.resource.data.sessionId is string &&
@@ -821,7 +829,7 @@ service cloud.firestore {
     match /osOperators/{docId} { allow read: if canAccessDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified(); allow create, delete: if false; }
     match /agenticTasks/{docId} { allow read: if canAccessDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified(); allow create, delete: if false; }
     match /businessPlans/{docId} {
-      allow read: if isAuthenticated();
+      allow read: if canAccessBusinessPlanResource();
       allow create: if isAuthenticated() && isValidBusinessPlan() && request.resource.data.authorId == request.auth.uid;
       allow update: if isAuthenticated() && isValidBusinessPlan() && canUpdateBusinessPlan() && validBusinessPlanImmutableFields();
       allow delete: if canUpdateBusinessPlan();

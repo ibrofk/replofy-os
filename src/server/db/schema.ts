@@ -1004,6 +1004,7 @@ export const contextSourceFolder = pgTable(
     ...timestampColumns,
   },
   (table) => [
+    uniqueIndex('context_source_folder_workspace_id_id_uidx').on(table.workspaceId, table.id),
     uniqueIndex('context_source_folder_workspace_name_uidx').on(table.workspaceId, table.name),
     foreignKey({
       columns: [table.workspaceId, table.createdByUserId],

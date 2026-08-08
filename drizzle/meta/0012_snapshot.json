@@ -1642,6 +1642,27 @@
         }
       },
       "indexes": {
+        "context_source_folder_workspace_id_id_uidx": {
+          "name": "context_source_folder_workspace_id_id_uidx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "context_source_folder_workspace_name_uidx": {
           "name": "context_source_folder_workspace_name_uidx",
           "columns": [

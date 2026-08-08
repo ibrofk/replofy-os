@@ -60,6 +60,7 @@ test('S3 asset store signs path-style upload, download, and delete requests', as
   assert.equal(calls[2]?.method, 'DELETE');
   assert.equal(calls[0]?.headers.get('x-amz-date'), '20260801T123456Z');
   assert.equal(calls[0]?.headers.get('x-amz-content-sha256'), 'UNSIGNED-PAYLOAD');
+  assert.equal(calls[0]?.headers.get('content-length'), String(payload.length));
   assert.match(calls[0]?.headers.get('authorization') || '', /^AWS4-HMAC-SHA256 Credential=access-key\//);
   assert.doesNotMatch(calls[0]?.headers.get('authorization') || '', /secret-key/);
 });
@@ -68,6 +69,9 @@ test('S3 asset store can create a missing bucket once when explicitly enabled', 
   const methods: string[] = [];
   const fetcher = async (_input: string | URL, init?: RequestInit) => {
     methods.push(init?.method || 'GET');
+    if (init?.method === 'PUT' && init.body && typeof init.body !== 'string') {
+      await readStream(init.body as unknown as Readable);
+    }
     if (init?.method === 'HEAD') return new Response(null, { status: 404 });
     return new Response(null, { status: init?.method === 'DELETE' ? 204 : 200 });
   };

@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { AssetStore, PutAssetInput, StoredAsset } from './asset-store.js';
 
@@ -210,15 +210,18 @@ export class S3AssetStore implements AssetStore {
     const url = this.objectUrl(input.workspaceId, input.objectKey);
     await this.ensureBucket();
     let size = 0;
-    input.body.on('data', (chunk: Buffer | string) => {
-      size += Buffer.byteLength(chunk);
-    });
+    const countedBody = input.body.pipe(new Transform({
+      transform(chunk: Buffer | string, _encoding, callback) {
+        size += Buffer.byteLength(chunk);
+        callback(null, chunk);
+      },
+    }));
     const response = await this.request('PUT', url, {
       headers: {
         'content-type': input.contentType,
         'content-length': String(input.size),
       },
-      body: input.body,
+      body: countedBody,
     });
     if (!response.ok) throw await responseError(response, 'asset upload');
     return { size };
