@@ -830,7 +830,8 @@ service cloud.firestore {
     match /agenticTasks/{docId} { allow read: if canAccessDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified(); allow create, delete: if false; }
     match /businessPlans/{docId} {
       allow read: if canAccessBusinessPlanResource();
-      allow create: if isAuthenticated() && isValidBusinessPlan() && request.resource.data.authorId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidBusinessPlan() && request.resource.data.authorId == request.auth.uid &&
+                     (!('companyId' in request.resource.data) || request.resource.data.companyId == null || isCompanyMember(request.resource.data.companyId));
       allow update: if isAuthenticated() && isValidBusinessPlan() && canUpdateBusinessPlan() && validBusinessPlanImmutableFields();
       allow delete: if canUpdateBusinessPlan();
     }

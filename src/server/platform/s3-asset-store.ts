@@ -245,7 +245,11 @@ export class S3AssetStore implements AssetStore {
   }
 
   async delete(workspaceId: string, objectKey: string) {
-    const response = await this.request('DELETE', this.objectUrl(workspaceId, objectKey));
+    const url = this.objectUrl(workspaceId, objectKey);
+    const existing = await this.request('HEAD', url);
+    if (existing.status === 404) return false;
+    if (!existing.ok) throw await responseError(existing, 'asset existence check');
+    const response = await this.request('DELETE', url);
     if (response.status === 404) return false;
     if (!response.ok) throw await responseError(response, 'asset deletion');
     return true;

@@ -192,6 +192,15 @@ await request(
 );
 await request(firestoreUrl(businessPlanPath), { headers: authHeaders(member.token) });
 await request(firestoreUrl(businessPlanPath), { headers: authHeaders(outsider.token) }, 403);
+await request(
+  firestoreUrl(`businessPlans/forged-${runId}`),
+  {
+    method: 'PATCH',
+    headers: authHeaders(outsider.token),
+    body: JSON.stringify(toFirestoreDocument(businessPlanDocument(outsider.uid, 'company-a'))),
+  },
+  403,
+);
 
 await request(
   firestoreUrl(`users/${member.uid}`),

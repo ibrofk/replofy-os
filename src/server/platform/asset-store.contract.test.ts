@@ -54,6 +54,10 @@ function createMockS3Store() {
       });
     }
 
+    if (method === 'HEAD') {
+      return new Response(null, { status: objects.has(key) ? 200 : 404 });
+    }
+
     if (method === 'DELETE') {
       const existed = objects.delete(key);
       return new Response(null, { status: existed ? 204 : 404 });

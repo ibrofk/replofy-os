@@ -57,7 +57,8 @@ test('S3 asset store signs path-style upload, download, and delete requests', as
 
   assert.equal(calls[0]?.url, 'https://objects.example.test/replofy-assets/workspace-one/asset-one.txt');
   assert.equal(calls[1]?.method, 'GET');
-  assert.equal(calls[2]?.method, 'DELETE');
+  assert.equal(calls[2]?.method, 'HEAD');
+  assert.equal(calls[3]?.method, 'DELETE');
   assert.equal(calls[0]?.headers.get('x-amz-date'), '20260801T123456Z');
   assert.equal(calls[0]?.headers.get('x-amz-content-sha256'), 'UNSIGNED-PAYLOAD');
   assert.equal(calls[0]?.headers.get('content-length'), String(payload.length));
