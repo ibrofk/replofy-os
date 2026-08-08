@@ -244,6 +244,7 @@ jobs:
             sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -qq
           sudo apt-get install --yes --quiet postgresql-client-18
+          export PATH="/usr/lib/postgresql/18/bin:$PATH"
           combined_root="$RUNNER_TEMP/replofy-combined-backup"
           mkdir -p "$combined_root/assets"
           printf 'combined-backup-proof\n' > "$combined_root/assets/release-marker.txt"
@@ -309,6 +310,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="/usr/lib/postgresql/18/bin:$PATH"
           postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
           test -n "$postgres_container"
           latest_migration="$(find drizzle -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1)"
