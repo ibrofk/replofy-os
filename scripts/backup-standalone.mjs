@@ -83,12 +83,15 @@ async function digest(filePath) {
 
 const assetEntries = [];
 const localAssetFiles = await collectFiles(assetsDirectory);
-assetEntries.push(...localAssetFiles.map((filePath) => ({
-  path: path.relative(assetsDirectory, filePath).split(path.sep).join('/'),
-  size: stat(filePath).then((details) => details.size),
-  sha256: digest(filePath),
-  storage: 'filesystem',
-})));
+for (const filePath of localAssetFiles) {
+  const details = await stat(filePath);
+  assetEntries.push({
+    path: path.relative(assetsDirectory, filePath).split(path.sep).join('/'),
+    size: details.size,
+    sha256: await digest(filePath),
+    storage: 'filesystem',
+  });
+}
 if (assetStore === 's3') {
   const s3 = createS3Client(s3OptionsFromEnvironment());
   await s3.ensureBucket();
@@ -105,10 +108,11 @@ if (assetStore === 's3') {
     const targetPath = path.join(assetsDirectory, 's3', ...segments);
     await mkdir(path.dirname(targetPath), { recursive: true });
     await pipeline(source.body, createWriteStream(targetPath, { flags: 'wx' }));
+    const details = await stat(targetPath);
     assetEntries.push({
       path: path.relative(assetsDirectory, targetPath).split(path.sep).join('/'),
-      size: stat(targetPath).then((details) => details.size),
-      sha256: digest(targetPath),
+      size: details.size,
+      sha256: await digest(targetPath),
       storage: 's3',
       objectKey: object.key,
       contentType: metadata.contentType,
@@ -132,7 +136,6 @@ const manifest = {
   },
   assets: assetEntries,
 };
-manifest.assets = await Promise.all(manifest.assets);
 await writeFile(path.join(bundleDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 console.log(`[replofy-os] standalone backup created: ${bundleDirectory}`);
 console.log(`[replofy-os] assets captured: ${manifest.assets.length}`);
