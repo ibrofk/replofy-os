@@ -6,15 +6,19 @@
  */
 export function postgresErrorCode(error: unknown): string | undefined {
   const seen = new Set<object>();
-  let current: unknown = error;
+  const pending: unknown[] = [error];
 
-  while (current && typeof current === 'object' && !seen.has(current)) {
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
     seen.add(current);
     if ('code' in current) {
       const code = (current as { code?: unknown }).code;
-      if (typeof code === 'string') return code;
+      if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
     }
-    current = 'cause' in current ? (current as { cause?: unknown }).cause : undefined;
+    for (const key of ['cause', 'originalError', 'error'] as const) {
+      if (key in current) pending.push((current as Record<string, unknown>)[key]);
+    }
   }
 
   return undefined;

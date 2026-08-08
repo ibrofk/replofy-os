@@ -249,6 +249,14 @@ export async function deleteOperatorDesk(
   deskId: string,
 ) {
   const id = parse(z.string().uuid(), deskId);
+  const linkedWorkOrders = await database
+    .select({ id: operatorWorkOrder.id })
+    .from(operatorWorkOrder)
+    .where(and(eq(operatorWorkOrder.operatorDeskId, id), eq(operatorWorkOrder.workspaceId, actor.workspaceId)))
+    .limit(1);
+  if (linkedWorkOrders[0]) {
+    throw new OperatorError('Operator Desks with work orders cannot be deleted; archive them instead.', 409);
+  }
   try {
     const rows = await database
       .delete(operatorDesk)

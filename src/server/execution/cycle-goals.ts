@@ -2,7 +2,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { WorkspaceRepository as PostgresDatabase } from '../platform/workspace-repository.js';
 import { postgresErrorCode } from '../db/errors.js';
-import { cycleGoal } from '../db/schema.js';
+import { cycleGoal, task } from '../db/schema.js';
 import type { WorkspaceActor } from './tasks.js';
 
 const goalStatusSchema = z.enum(['active', 'completed', 'archived']);
@@ -129,6 +129,14 @@ export async function deleteCycleGoal(
   goalId: string,
 ) {
   const parsedGoalId = parseOrThrow(z.string().uuid().safeParse(goalId));
+  const linkedTasks = await database
+    .select({ id: task.id })
+    .from(task)
+    .where(and(eq(task.workspaceId, actor.workspaceId), eq(task.cycleGoalId, parsedGoalId)))
+    .limit(1);
+  if (linkedTasks[0]) {
+    throw new CycleGoalError('Move or delete linked tasks before deleting this cycle goal.', 409);
+  }
   try {
     const rows = await database
       .delete(cycleGoal)

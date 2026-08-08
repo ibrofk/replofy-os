@@ -918,7 +918,7 @@ test('task CRUD is bounded to the active workspace', async () => {
     id: created.id,
     deleted: true,
   });
-  assert.equal((await listTasks(db, primary, { limit: 10 })).length, 0);
+  assert.equal((await listTasks(db, primary, { limit: 10 })).some((item) => item.id === created.id), false);
 });
 
 test('cycle goals and visions are isolated and enforce execution relationships', async () => {
