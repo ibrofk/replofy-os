@@ -15,13 +15,14 @@ function quoteIdentifier(value) {
   return `"${value}"`;
 }
 
-async function upsert(client, table, row) {
+async function upsert(client, table, row, conflictColumns = ['id']) {
   const columns = Object.keys(row);
   const quotedColumns = columns.map(quoteIdentifier);
+  const conflictTarget = conflictColumns.map(quoteIdentifier).join(', ');
   const placeholders = columns.map((_, index) => `$${index + 1}`);
   const updates = columns.filter((column) => column !== 'id').map((column) => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`);
   await client.query(
-    `insert into ${quoteIdentifier(table)} (${quotedColumns.join(', ')}) values (${placeholders.join(', ')}) on conflict ("id") do update set ${updates.join(', ')}`,
+    `insert into ${quoteIdentifier(table)} (${quotedColumns.join(', ')}) values (${placeholders.join(', ')}) on conflict (${conflictTarget}) do update set ${updates.join(', ')}`,
     columns.map((column) => row[column]),
   );
 }
@@ -166,7 +167,7 @@ try {
     created_by_user_id: ownerId,
     created_at: now,
     updated_at: now,
-  });
+  }, ['workspace_id', 'week_number']);
   await upsert(client, 'operator_desk', {
     id: operatorDeskId,
     workspace_id: workspace.id,
