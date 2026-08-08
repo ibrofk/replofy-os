@@ -341,9 +341,9 @@ jobs:
           prior_dump="$RUNNER_TEMP/replofy-prior-release.dump"
           pg_dump "$prior_url" --format=custom --no-owner --no-privileges --file="$prior_dump"
           DATABASE_URL="$prior_url" npx tsx src/server/migrate.ts
-          upgraded_context="$(psql "$prior_url" --tuples-only --no-align \
-            --command="SELECT (to_regclass('public.context_source') IS NOT NULL)::text;")"
-          test "$upgraded_context" = 't'
+          upgraded_latest="$(psql "$prior_url" --tuples-only --no-align \
+            --command="SELECT (to_regclass('public.feedback') IS NOT NULL)::text;")"
+          test "$upgraded_latest" = 't'
           upgraded_workspace="$(psql "$prior_url" --tuples-only --no-align \
             --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
           test "$upgraded_workspace" -eq 1
@@ -353,9 +353,9 @@ jobs:
           docker exec "$postgres_container" dropdb --maintenance-db=replofy_test --username=replofy "$prior_database"
           docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$prior_database"
           pg_restore --dbname="$prior_url" --no-owner --no-privileges --exit-on-error --single-transaction "$prior_dump"
-          rollback_context="$(psql "$prior_url" --tuples-only --no-align \
-            --command="SELECT (to_regclass('public.context_source') IS NULL)::text;")"
-          test "$rollback_context" = 't'
+          rollback_latest="$(psql "$prior_url" --tuples-only --no-align \
+            --command="SELECT (to_regclass('public.feedback') IS NULL)::text;")"
+          test "$rollback_latest" = 't'
           rollback_workspace="$(psql "$prior_url" --tuples-only --no-align \
             --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
           test "$rollback_workspace" -eq 1
