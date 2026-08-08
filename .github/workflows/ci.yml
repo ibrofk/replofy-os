@@ -343,21 +343,26 @@ jobs:
           DATABASE_URL="$prior_url" npx tsx src/server/migrate.ts
           upgraded_latest="$(psql "$prior_url" --tuples-only --no-align \
             --command="SELECT (to_regclass('public.feedback') IS NOT NULL)::text;")"
+          echo "upgraded_latest=$upgraded_latest"
           test "$upgraded_latest" = 't'
           upgraded_workspace="$(psql "$prior_url" --tuples-only --no-align \
             --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
+          echo "upgraded_workspace=$upgraded_workspace"
           test "$upgraded_workspace" -eq 1
           upgraded_migrations="$(psql "$prior_url" --tuples-only --no-align \
             --command='SELECT count(*) FROM replofy_meta.migrations;')"
+          echo "upgraded_migrations=$upgraded_migrations prior_entry_count=$prior_entry_count"
           test "$upgraded_migrations" -eq "$((prior_entry_count + 1))"
           docker exec "$postgres_container" dropdb --maintenance-db=replofy_test --username=replofy "$prior_database"
           docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$prior_database"
           pg_restore --dbname="$prior_url" --no-owner --no-privileges --exit-on-error --single-transaction "$prior_dump"
           rollback_latest="$(psql "$prior_url" --tuples-only --no-align \
             --command="SELECT (to_regclass('public.feedback') IS NULL)::text;")"
+          echo "rollback_latest=$rollback_latest"
           test "$rollback_latest" = 't'
           rollback_workspace="$(psql "$prior_url" --tuples-only --no-align \
             --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
+          echo "rollback_workspace=$rollback_workspace"
           test "$rollback_workspace" -eq 1
       - name: Prove migrations remain idempotent after restore
         run: npm run db:migrate
