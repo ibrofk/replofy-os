@@ -21,7 +21,7 @@ the item but cannot prove ownership or legal approval by itself.
 | MCP support | `mcp/replofy_os_mcp_server.py` plus hosted compatibility path | Local hosted protocol smoke, Python syntax, in-process FastMCP dispatch, and subprocess HTTP plus stdio transports against a stub API; CI runs the same installed-dependency suite; live hosted API parity and hosted/standalone parity remain external | Run with `mcp/requirements.txt`; do not claim live-host parity until an authenticated deployed endpoint is exercised against both documented transports. |
 | Public project surface | Apache-2.0 license, contribution/security/support/governance docs, changelog, release policy, `check:public-surface`, and clean-root CI export | Local structure/export proof; CI step configured | Complete provenance and legal review before publishing artifacts. |
 | Dependency and license gates | `check:dependencies`, `check:licenses`, `docs/third-party-license-overrides.json`, documented React Router RSC exception | Local lockfile license scan works with or without `node_modules`; the full build/test gate still requires installed dependencies | Reassess the exception and explicit license evidence when routing or dependencies change. |
-| Repository history safety | `check:public-safety:history`, `export:public-root`, and the CI clean-root initial-history rehearsal | Current source history remains red; the exporter and application CI prove a new clean-root commit has no reported historical findings | Rotate affected credentials and scrub history, or publish the reviewed clean root while retaining the clean-history scan log. |
+| Repository history safety | `check:public-safety:history`, `export:public-root`, and the CI clean-root initial-history rehearsal | The original source checkout remains red on legacy refs; the published `ibrofk/replofy-os` clean-root history passes the scan across its published commits | Keep the source checkout private, retain the clean-history evidence, and run the same gate for any future mirror or tag. |
 | Asset, trademark, and privacy provenance | `docs/ASSET-PROVENANCE.md`, `TRADEMARKS.md`, `PRIVACY.md` | Human review required | Obtain ownership/permission and deployment-specific privacy sign-off. |
 
 ## Current verification command set
@@ -76,7 +76,7 @@ The direct S3AssetStore proof runs in the MinIO-backed CI job:
 npm run test:s3-asset-store:integration
 ```
 
-The pre-publication gate is intentionally separate:
+The future-mirror history gate is intentionally separate:
 
 ```bash
 npm run check:public-safety:history

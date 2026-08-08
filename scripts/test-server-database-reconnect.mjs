@@ -160,7 +160,7 @@ async function run() {
     }
     console.log('Database restart reconnect rehearsal passed: fresh API process served the preserved authenticated task.');
   } finally {
-    await stopServer(handle);
+    await stopServer(handle, true);
     if (ownsDataDirectory) await rm(dataDirectory, { recursive: true, force: true });
   }
 }

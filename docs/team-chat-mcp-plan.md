@@ -19,11 +19,9 @@ Add a workspace-scoped team chat surface where human team members and AI agents 
 2. Extend the secured external API with CRUD resources and a purpose-built filtered message endpoint.
 3. Register ergonomic tools on both MCP surfaces and update discovery documentation.
 4. Add the `/team-chat` page and sidebar route.
-5. Verify TypeScript, Firestore emulator behavior, MCP discovery, Firestore rules deployment, and Vercel production deployment.
+5. Verify TypeScript, Firestore emulator behavior, MCP discovery, Firestore rules deployment, and the deployment owned by the operator of the checkout.
 
 ## Delivery Result
-- Completed on 2026-05-31.
-- Firestore rules deployed to the configured project.
-- Vercel production deployment: `dpl_BSxrvSTNQSaodq2zpok8rVybFDgA`.
-- Production alias: `https://os.replofy.co`.
-- Verification passed for TypeScript lint, Vite build, FastMCP smoke tests, emulator-backed API smoke, production MCP health, OpenAPI discovery, hosted MCP tool inventory, browser route load, and post-deploy Vercel error logs.
+- Historical verification completed on 2026-05-31 against a founder-managed deployment.
+- Deployment identifiers and aliases are intentionally omitted from this public repository.
+- Re-run authenticated production MCP, OpenAPI, browser, and error-log checks against your own deployment before relying on hosted-parity claims.

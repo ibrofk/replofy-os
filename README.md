@@ -12,12 +12,14 @@ growth, team communication, and AI-assisted operations.
 > adapter remains available for hosted compatibility; standalone strategy,
 > planning, growth, technical, and operator data use PostgreSQL.
 >
-> Before making a public mirror, run `npm run check:public-safety:history`.
-> Reachable legacy refs currently require credential rotation plus history
-> scrubbing, or a new clean repository root. Use
-> `npm run export:public-root -- --out D:/path/to/public-root` to produce that
-> root without `.git`, ignored files, dependencies, or generated paths covered
-> by the export policy; review custom output directories before publishing.
+> **Public preview:** the reviewed clean-root repository is published at
+> [github.com/ibrofk/replofy-os](https://github.com/ibrofk/replofy-os). Its
+> public history starts at a clean root; the original source checkout remains
+> a private audit archive because its reachable legacy refs still require
+> credential rotation and history scrubbing. The current CI evidence is tracked
+> in [the Actions workflow](https://github.com/ibrofk/replofy-os/actions).
+> For a future mirror or fork, run `npm run check:public-safety:history` across
+> every ref you intend to expose and use the clean-root exporter when needed.
 
 ## Run Locally
 

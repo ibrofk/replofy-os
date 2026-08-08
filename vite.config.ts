@@ -34,6 +34,9 @@ function hydrateServerEnv(env: Record<string, string | undefined>, mode: string)
   const serverEnvKeys = [
     'GEMINI_API_KEY',
     'FIREBASE_SERVICE_ACCOUNT_JSON',
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_DATABASE_ID',
+    'FIRESTORE_DATABASE_ID',
     'FIREBASE_ADMIN_PROJECT_ID',
     'FIREBASE_ADMIN_CLIENT_EMAIL',
     'FIREBASE_ADMIN_PRIVATE_KEY',

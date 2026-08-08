@@ -1,9 +1,10 @@
 # Public release runbook
 
 This runbook separates reversible repository preparation from the irreversible
-act of publishing Git history. It assumes the current tree is the candidate
-release and that `npm run check:public-safety:history` may still report legacy
-refs.
+act of publishing Git history. The reviewed clean-root tree is now published
+at `https://github.com/ibrofk/replofy-os`; the source checkout remains a
+private audit archive because its legacy refs still require cleanup. Use the
+same procedure for a future mirror or a new release line.
 
 ## 1. Rotate and review
 

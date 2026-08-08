@@ -199,7 +199,7 @@ async function run() {
     console.log('Process crash/restart rehearsal passed: bootstrap, session, workspace, and task persisted.');
   } finally {
     try {
-      await stopServer(handle);
+      await stopServer(handle, true);
     } finally {
       if (ownsDataDirectory) await rm(dataDirectory, { recursive: true, force: true });
     }

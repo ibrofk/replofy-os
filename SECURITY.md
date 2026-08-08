@@ -24,7 +24,8 @@ disclosure timing will be coordinated through the private advisory.
 
 The normal public-safety check scans the working tree for known deployment
 identifiers, high-confidence credential formats, private-key material, and
-credential-like filenames. Before publishing a public mirror, run
+credential-like filenames. Before publishing a future public mirror or tagged
+release, run
 `npm run check:public-safety:history` across every ref that will be exposed. If
 it reports a credential or private-key match, rotate the credential and scrub
 the history, or start the public mirror from a new clean root commit. These

@@ -2,14 +2,14 @@
 
 Replofy OS is pre-release software until a tagged 1.0 release is published.
 
-## Current pre-publication status
+## Current public-preview status
 
-The local implementation and dependency-only checks are green in the current
-working tree. This checkout is not yet a publishable public mirror: the
-reachable Git history still contains legacy production configuration patterns,
-and PostgreSQL/MinIO/Firebase-rule/MCP service-backed checks still need a clean
-CI run. See [docs/option-c-completion-matrix.md](docs/option-c-completion-matrix.md)
-for the evidence ledger.
+The reviewed clean-root tree is published at
+[`ibrofk/replofy-os`](https://github.com/ibrofk/replofy-os). The source checkout
+remains a private audit archive because its reachable Git history contains
+legacy production configuration patterns. Service-backed evidence is retained
+in the repository's GitHub Actions workflow; the evidence ledger is in
+[docs/option-c-completion-matrix.md](docs/option-c-completion-matrix.md).
 
 ## Release gates
 
@@ -24,7 +24,7 @@ The dependency policy may report the React Router RSC advisory as an explicit
 exception while this app remains on declarative routing; reassess that
 exception when the routing mode or package support changes.
 
-Before creating a public mirror or tagged release, run
+For any future public mirror or tagged release, run
 `npm run check:public-safety:history` against every ref that will be published.
 If it reports a finding, rotate the affected credential and scrub the history,
 or publish from a new repository whose initial history contains only the clean
