@@ -235,7 +235,15 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install --yes --quiet postgresql-client
+          sudo apt-get install --yes --quiet ca-certificates curl gnupg
+          sudo install --directory --mode=0755 /etc/apt/keyrings
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc |
+            gpg --dearmor |
+            sudo tee /etc/apt/keyrings/postgresql.gpg >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo \"$VERSION_CODENAME\")-pgdg main" |
+            sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install --yes --quiet postgresql-client-18
           combined_root="$RUNNER_TEMP/replofy-combined-backup"
           mkdir -p "$combined_root/assets"
           printf 'combined-backup-proof\n' > "$combined_root/assets/release-marker.txt"
