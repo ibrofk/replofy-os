@@ -193,9 +193,18 @@ export function createS3Client(options) {
       };
     },
 
-    async putObject(key, body, contentType) {
+    async putObject(key, body, contentType, contentLength) {
+      const inferredLength = typeof contentLength === 'number'
+        ? contentLength
+        : typeof body === 'string'
+          ? Buffer.byteLength(body)
+          : body instanceof Uint8Array
+            ? body.byteLength
+            : undefined;
+      const headers = { 'content-type': contentType || 'application/octet-stream' };
+      if (Number.isSafeInteger(inferredLength) && inferredLength >= 0) headers['content-length'] = String(inferredLength);
       const response = await request('PUT', urlFor(key), {
-        headers: { 'content-type': contentType || 'application/octet-stream' },
+        headers,
         body,
       });
       if (!response.ok) throw await errorFor(response, 'object upload');

@@ -42,7 +42,7 @@ test('S3 CLI client lists and transfers objects with signed requests', async () 
   const object = await client.getObject('workspace-one/asset.txt');
   assert.ok(object);
   assert.deepEqual(await readStream(object.body), Buffer.from('payload'));
-  await client.putObject('workspace-one/asset.txt', Readable.from('payload'), 'text/plain');
+  await client.putObject('workspace-one/asset.txt', Readable.from('payload'), 'text/plain', 7);
   assert.equal(await client.deleteObject('workspace-one/asset.txt'), true);
   assert.equal(calls[0].url.searchParams.get('list-type'), '2');
   assert.match(calls[0].init.headers.Authorization, /^AWS4-HMAC-SHA256 Credential=access-key\//);

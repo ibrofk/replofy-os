@@ -149,7 +149,7 @@ Optional:
 
 ```bash
 export REPLOFY_OS_TIMEOUT_SECONDS="30"
-export REPLOFY_OS_SKILLS_DIR="$PWD/.agents/skills"
+export REPLOFY_OS_SKILLS_DIR="$PWD/../skills"
 ```
 
 ## Run
@@ -198,7 +198,7 @@ Example MCP client entry:
 - Use `download_creative_asset` with a Creative Hub asset id to create an authenticated download URL for an active asset.
 - `replofy://config` includes `bugs`, `roadmap-items`, and `blog-articles`, plus direct `replofy://resource/...` entries for quick triage and planning.
 - `replofy://context/content` includes Blogs Hub and Creative Hub items. `replofy://blogs/roadmap` groups blog articles into `now`, `next`, and `later`.
-- `replofy://skills/registry` lists local Replofy OS workspace skills. Read a full definition from `replofy://skills/{skill_name}`. Override the default `.agents/skills` directory with `REPLOFY_OS_SKILLS_DIR` when needed.
+- `replofy://skills/registry` lists the checked-in Replofy OS skills under the repository `skills/` directory. Read a full definition from `replofy://skills/{skill_name}`. Override that directory with `REPLOFY_OS_SKILLS_DIR` when needed.
 - `replofy://team-chat/channel/{channel_id}/latest/{limit}` exposes bounded recent history for one Team Chat channel.
 - `replofy://record/{resource}/{record_id}` returns the requested object first, followed by compact attached and suggested context.
 - `replofy_request` is the fallback tool when you need a route that does not yet have a dedicated MCP wrapper.

@@ -91,7 +91,7 @@ for (const entry of manifest.assets) {
     if (typeof entry.contentType !== 'string' || !entry.contentType.trim()) {
       throw new Error(`S3 asset is missing content type: ${displayPath}`);
     }
-    s3Entries.push({ displayPath, segments, objectKey: objectSegments.join('/'), contentType: entry.contentType });
+    s3Entries.push({ displayPath, segments, objectKey: objectSegments.join('/'), contentType: entry.contentType, size: details.size });
   } else {
     assetEntries.push({ displayPath, segments });
   }
@@ -119,7 +119,7 @@ try {
   if (s3) {
     for (const entry of s3Entries) {
       const sourcePath = path.join(assetsDirectory, ...entry.segments);
-      await s3.putObject(entry.objectKey, createReadStream(sourcePath), entry.contentType);
+      await s3.putObject(entry.objectKey, createReadStream(sourcePath), entry.contentType, entry.size);
       uploadedS3Keys.push(entry.objectKey);
     }
   }

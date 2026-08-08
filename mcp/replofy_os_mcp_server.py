@@ -586,7 +586,7 @@ TASK_STATUS_PRIORITY = {
     "done": 3,
 }
 
-DEFAULT_SKILLS_DIR = Path(__file__).resolve().parents[2] / ".agents" / "skills"
+DEFAULT_SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills"
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 

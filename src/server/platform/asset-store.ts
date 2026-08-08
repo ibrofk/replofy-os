@@ -12,6 +12,7 @@ export type PutAssetInput = {
   workspaceId: string;
   objectKey: string;
   contentType: string;
+  size: number;
   body: Readable;
 };
 

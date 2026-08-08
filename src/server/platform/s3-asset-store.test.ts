@@ -43,6 +43,7 @@ test('S3 asset store signs path-style upload, download, and delete requests', as
       workspaceId: 'workspace-one',
       objectKey: 'asset-one.txt',
       contentType: 'text/plain',
+      size: payload.length,
       body: Readable.from(payload),
     }),
     { size: payload.length },
@@ -84,12 +85,14 @@ test('S3 asset store can create a missing bucket once when explicitly enabled', 
     workspaceId: 'workspace-one',
     objectKey: 'asset-one.txt',
     contentType: 'text/plain',
+    size: 7,
     body: Readable.from('payload'),
   });
   await store.put({
     workspaceId: 'workspace-one',
     objectKey: 'asset-two.txt',
     contentType: 'text/plain',
+    size: 7,
     body: Readable.from('payload'),
   });
   assert.deepEqual(methods, ['HEAD', 'PUT', 'PUT', 'PUT']);

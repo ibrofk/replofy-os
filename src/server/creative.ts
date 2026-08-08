@@ -326,6 +326,7 @@ export async function uploadCreativeAsset(
     workspaceId: actor.workspaceId,
     objectKey,
     contentType: data.mimeType,
+    size: data.fileSize,
     body: body.pipe(limiter),
   });
   if (stored.size !== data.fileSize) {

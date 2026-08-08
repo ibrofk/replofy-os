@@ -22,6 +22,7 @@ export async function runAssetStoreContract(store: AssetStore, label = store.pro
     workspaceId,
     objectKey,
     contentType: 'text/plain',
+    size: payload.length,
     body: Readable.from(payload),
   });
   assert.equal(result.size, payload.length);

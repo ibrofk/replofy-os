@@ -20,6 +20,7 @@ const requiredFiles = [
   'docs/option-c-completion-matrix.md',
   'docs/public-release-runbook.md',
   'docs/third-party-license-overrides.json',
+  'skills/replofy-blog-skill/SKILL.md',
   'scripts/export-public-root.mjs',
   '.github/workflows/ci.yml',
   'Dockerfile',

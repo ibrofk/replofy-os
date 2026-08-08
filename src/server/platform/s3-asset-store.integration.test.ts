@@ -37,6 +37,7 @@ test('S3AssetStore persists and isolates objects against the configured MinIO en
         workspaceId,
         objectKey,
         contentType: 'text/plain',
+        size: payload.length,
         body: Readable.from(payload),
       }),
       { size: payload.length },

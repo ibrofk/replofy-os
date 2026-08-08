@@ -214,7 +214,10 @@ export class S3AssetStore implements AssetStore {
       size += Buffer.byteLength(chunk);
     });
     const response = await this.request('PUT', url, {
-      headers: { 'content-type': input.contentType },
+      headers: {
+        'content-type': input.contentType,
+        'content-length': String(input.size),
+      },
       body: input.body,
     });
     if (!response.ok) throw await responseError(response, 'asset upload');

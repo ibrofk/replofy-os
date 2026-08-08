@@ -1,9 +1,14 @@
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+
 const projectId = process.env.FIREBASE_PROJECT_ID || 'demo-replofy-os';
 const databaseId = process.env.FIREBASE_DATABASE_ID || '(default)';
 const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
 const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8081';
 const apiKey = 'demo-creative-hub-rules-test';
 const runId = Date.now().toString(36);
+const adminApp = initializeApp({ projectId }, `creative-hub-rules-${runId}`);
+const adminDb = getFirestore(adminApp);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -62,13 +67,25 @@ async function createActor(label, companyId, role) {
     },
   );
 
+  const effectiveRole = role === 'master-admin' ? 'admin' : role;
+  const invitationId = `creative-hub-invite-${label}-${runId}`;
+  await adminDb.doc(`invitations/${invitationId}`).set({
+    id: invitationId,
+    email,
+    companyId,
+    role: effectiveRole,
+    status: 'pending',
+  });
+
   const profile = {
     email,
     displayName: label,
-    role,
+    role: effectiveRole,
     companyId,
     onboardingCompleted: true,
     createdAt: new Date().toISOString(),
+    acceptedInvitationId: invitationId,
+    invitationAcceptedAt: new Date().toISOString(),
   };
 
   await request(
@@ -139,9 +156,9 @@ async function writeCreative(path, token, creative, expectedStatus = 200) {
   );
 }
 
-const admin = await createActor('master-admin', 'company-a', 'master-admin');
+const admin = await createActor('master-admin', 'company-a', 'admin');
 const member = await createActor('member', 'company-a', 'member');
-const outsider = await createActor('outsider', 'company-b', 'master-admin');
+const outsider = await createActor('outsider', 'company-b', 'admin');
 const creativePath = `creativeItems/creative-${runId}`;
 const creative = creativeDocument(member.uid, 'company-a');
 

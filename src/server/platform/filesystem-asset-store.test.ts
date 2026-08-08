@@ -29,6 +29,7 @@ test('filesystem assets persist with workspace isolation and metadata', async ()
     workspaceId: 'workspace-one',
     objectKey: 'asset-one.txt',
     contentType: 'text/plain',
+    size: payload.length,
     body: Readable.from(payload),
   });
 
@@ -51,6 +52,7 @@ test('filesystem assets reject path traversal', async () => {
       workspaceId: '..',
       objectKey: 'escape.txt',
       contentType: 'text/plain',
+      size: 7,
       body: Readable.from('blocked'),
     }),
     /unsupported path characters/,
@@ -61,6 +63,7 @@ test('filesystem assets reject path traversal', async () => {
       workspaceId: 'workspace-one',
       objectKey: '../escape.txt',
       contentType: 'text/plain',
+      size: 7,
       body: Readable.from('blocked'),
     }),
     /unsupported path characters/,
