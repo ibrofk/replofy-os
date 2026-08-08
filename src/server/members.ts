@@ -3,6 +3,7 @@ import { hashPassword } from 'better-auth/crypto';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { ServerConfig } from './config.js';
+import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import {
   account,
@@ -119,7 +120,7 @@ export async function createWorkspaceInvitation(
       acceptUrl: `${config.appUrl}/join?token=${encodeURIComponent(clearToken)}`,
     };
   } catch (error) {
-    if ((error as { code?: string }).code === '23505') {
+    if (postgresErrorCode(error) === '23505') {
       throw new MemberError('Could not create a unique invitation. Try again.', 409);
     }
     throw error;

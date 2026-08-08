@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { WorkspaceRepository as PostgresDatabase } from '../platform/workspace-repository.js';
+import { postgresErrorCode } from '../db/errors.js';
 import { task } from '../db/schema.js';
 
 export type WorkspaceActor = {
@@ -145,7 +146,7 @@ export async function createTask(
       .returning();
     return asApiTask(rows[0]);
   } catch (error) {
-    if ((error as { code?: string }).code === '23503') {
+    if (postgresErrorCode(error) === '23503') {
       throw new TaskError('A linked goal or assignee is not available in this workspace.', 422);
     }
     throw error;
@@ -197,7 +198,7 @@ export async function updateTask(
       .returning();
     return asApiTask(rows[0]);
   } catch (error) {
-    if ((error as { code?: string }).code === '23503') {
+    if (postgresErrorCode(error) === '23503') {
       throw new TaskError('A linked goal or assignee is not available in this workspace.', 422);
     }
     throw error;

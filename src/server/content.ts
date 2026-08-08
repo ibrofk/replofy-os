@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { blogArticle, workspaceMembership } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
@@ -150,7 +151,7 @@ async function assertOwner(
 }
 
 function handleConflict(error: unknown): never {
-  if ((error as { code?: string }).code === '23505') {
+  if (postgresErrorCode(error) === '23505') {
     throw new ContentError('An article with this slug already exists in the workspace.', 409);
   }
   throw error;

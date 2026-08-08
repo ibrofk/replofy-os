@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
+import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import {
   chatReadState,
@@ -464,7 +465,7 @@ export async function createWeekMarker(database: PostgresDatabase, actor: Worksp
     }).returning();
     return serializeWeekMarker(rows[0]);
   } catch (error) {
-    if ((error as { code?: string }).code === '23505') throw new StrategyError('That week already has a marker in this workspace.', 409);
+    if (postgresErrorCode(error) === '23505') throw new StrategyError('That week already has a marker in this workspace.', 409);
     throw error;
   }
 }

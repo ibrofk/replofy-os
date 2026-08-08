@@ -1,5 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { apiEndpoint, environment, environmentDeployment } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
@@ -63,7 +64,7 @@ function parse<T>(schema: z.ZodType<T>, input: unknown, message: string): T {
 }
 
 function isUniqueViolation(error: unknown) {
-  return Boolean(error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === '23505');
+  return postgresErrorCode(error) === '23505';
 }
 
 function serializeEndpoint(row: typeof apiEndpoint.$inferSelect) {

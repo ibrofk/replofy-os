@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { WorkspaceRepository as PostgresDatabase } from '../platform/workspace-repository.js';
+import { postgresErrorCode } from '../db/errors.js';
 import { cycleGoal } from '../db/schema.js';
 import type { WorkspaceActor } from './tasks.js';
 
@@ -138,7 +139,7 @@ export async function deleteCycleGoal(
     if (rows.length === 0) throw new CycleGoalError('Cycle goal not found.', 404);
     return { id: rows[0].id, deleted: true };
   } catch (error) {
-    if ((error as { code?: string }).code === '23503') {
+    if (postgresErrorCode(error) === '23503') {
       throw new CycleGoalError('Move or delete linked tasks before deleting this cycle goal.', 409);
     }
     throw error;

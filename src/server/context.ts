@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { postgresErrorCode } from './db/errors.js';
 import type { IngestionItem, IngestionPayload } from '../services/geminiServer.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { GeminiAIProvider } from './platform/gemini-ai-provider.js';
@@ -401,7 +402,7 @@ export async function createContextSourceFolder(database: PostgresDatabase, acto
     const rows = await database.insert(contextSourceFolder).values({ workspaceId: actor.workspaceId, createdByUserId: actor.userId, name: data.name }).returning();
     return serializeFolder(rows[0]);
   } catch (error) {
-    if ((error as { code?: string }).code === '23505') throw new ContextError('A folder with this name already exists.', 409);
+    if (postgresErrorCode(error) === '23505') throw new ContextError('A folder with this name already exists.', 409);
     throw error;
   }
 }

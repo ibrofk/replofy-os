@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, ilike, inArray, lte, or } from 'drizzle-orm';
 import { z } from 'zod';
+import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import {
   teamChatChannel,
@@ -255,7 +256,7 @@ export async function deleteTeamChatChannel(
     if (!rows[0]) throw new TeamChatError('Channel not found.', 404);
     return { id: rows[0].id, deleted: true as const };
   } catch (error) {
-    if ((error as { code?: string }).code === '23503') {
+    if (postgresErrorCode(error) === '23503') {
       throw new TeamChatError('Channels with message history cannot be deleted; archive them instead.', 409);
     }
     throw error;
@@ -387,7 +388,7 @@ export async function deleteTeamChatParticipant(
     if (!rows[0]) throw new TeamChatError('Participant not found.', 404);
     return { id: rows[0].id, deleted: true as const };
   } catch (error) {
-    if ((error as { code?: string }).code === '23503') {
+    if (postgresErrorCode(error) === '23503') {
       throw new TeamChatError('Participants with message history cannot be deleted; deactivate them instead.', 409);
     }
     throw error;

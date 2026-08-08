@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, lte, or } from 'drizzle-orm';
 import { z } from 'zod';
+import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { operatorCheckin, operatorDesk, operatorWorkOrder } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
@@ -143,10 +144,10 @@ function serializeOrder(row: typeof operatorWorkOrder.$inferSelect) {
 }
 
 function conflict(error: unknown): never {
-  if ((error as { code?: string }).code === '23505') {
+  if (postgresErrorCode(error) === '23505') {
     throw new OperatorError('An Operator Desk with this slug already exists.', 409);
   }
-  if ((error as { code?: string }).code === '23503') {
+  if (postgresErrorCode(error) === '23503') {
     throw new OperatorError('A linked Operator Desk is unavailable in this workspace.', 422);
   }
   throw error;
@@ -256,7 +257,7 @@ export async function deleteOperatorDesk(
     if (!rows[0]) throw new OperatorError('Operator Desk not found.', 404);
     return { id: rows[0].id, deleted: true as const };
   } catch (error) {
-    if ((error as { code?: string }).code === '23503') {
+    if (postgresErrorCode(error) === '23503') {
       throw new OperatorError('Operator Desks with work orders cannot be deleted; archive them instead.', 409);
     }
     throw error;

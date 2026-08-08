@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { postgresErrorCode } from './db/errors.js';
 import { session, workspace, workspaceMembership } from './db/schema.js';
 import type { WorkspaceRepository } from './platform/workspace-repository.js';
 
@@ -66,7 +67,7 @@ export async function createWorkspace(database: WorkspaceRepository, userId: str
       });
     });
   } catch (error) {
-    if ((error as { code?: string }).code === '23505') {
+    if (postgresErrorCode(error) === '23505') {
       throw new WorkspaceError('A workspace with this slug already exists.', 409);
     }
     throw error;
