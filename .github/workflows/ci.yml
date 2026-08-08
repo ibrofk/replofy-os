@@ -344,7 +344,7 @@ jobs:
           upgraded_latest="$(psql "$prior_url" --tuples-only --no-align \
             --command="SELECT (to_regclass('public.feedback') IS NOT NULL)::text;")"
           echo "upgraded_latest=$upgraded_latest"
-          test "$upgraded_latest" = 't'
+          test "$upgraded_latest" = 'true'
           upgraded_workspace="$(psql "$prior_url" --tuples-only --no-align \
             --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
           echo "upgraded_workspace=$upgraded_workspace"
@@ -359,7 +359,7 @@ jobs:
           rollback_latest="$(psql "$prior_url" --tuples-only --no-align \
             --command="SELECT (to_regclass('public.feedback') IS NULL)::text;")"
           echo "rollback_latest=$rollback_latest"
-          test "$rollback_latest" = 't'
+          test "$rollback_latest" = 'true'
           rollback_workspace="$(psql "$prior_url" --tuples-only --no-align \
             --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
           echo "rollback_workspace=$rollback_workspace"
