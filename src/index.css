@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  @apply bg-zinc-50 text-zinc-900 font-sans antialiased selection:bg-zinc-200;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-300 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-zinc-400;
+}
+
+.bento-card {
+  @apply bg-white border border-zinc-200 rounded-[2rem] p-5 shadow-sm flex flex-col relative overflow-hidden transition-all duration-200;
+}
+.bento-card:hover {
+  @apply border-zinc-300 shadow-md;
+}
+.bento-title {
+  @apply font-sans text-sm font-semibold text-zinc-900 mb-4 flex items-center gap-2;
+}
+
+.field-input {
+  @apply w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-900/10 placeholder:text-zinc-400;
+}
+
+.field-textarea {
+  @apply w-full resize-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-medium leading-6 text-zinc-900 outline-none transition focus:border-zinc-400 focus:ring-2 focus:ring-zinc-900/10 placeholder:text-zinc-400;
+}

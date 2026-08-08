@@ -1,0 +1,61 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/.well-known/oauth-protected-resource",
+      "destination": "/api/oauth/protected-resource"
+    },
+    {
+      "source": "/.well-known/oauth-protected-resource/mcp",
+      "destination": "/api/oauth/protected-resource"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server",
+      "destination": "/api/oauth/authorization-server"
+    },
+    {
+      "source": "/.well-known/oauth-authorization-server/mcp",
+      "destination": "/api/oauth/authorization-server"
+    },
+    {
+      "source": "/.well-known/openid-configuration",
+      "destination": "/api/oauth/not-found"
+    },
+    {
+      "source": "/.well-known/openid-configuration/mcp",
+      "destination": "/api/oauth/not-found"
+    },
+    {
+      "source": "/mcp/.well-known/oauth-protected-resource",
+      "destination": "/api/oauth/protected-resource"
+    },
+    {
+      "source": "/mcp/.well-known/oauth-authorization-server",
+      "destination": "/api/oauth/authorization-server"
+    },
+    {
+      "source": "/mcp/.well-known/openid-configuration",
+      "destination": "/api/oauth/not-found"
+    },
+    {
+      "source": "/mcp",
+      "destination": "/api/mcp"
+    },
+    {
+      "source": "/mcp/:path(.*)",
+      "destination": "/api/mcp"
+    },
+    {
+      "source": "/api/v1/:path(.*)",
+      "destination": "/api/v1/[...path]?path=:path"
+    },
+    {
+      "source": "/api/internal/:path(.*)",
+      "destination": "/api/internal/[...path]?path=:path"
+    },
+    {
+      "source": "/((?!api(?:/|$)).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

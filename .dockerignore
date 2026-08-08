@@ -1,0 +1,14 @@
+.git
+.github
+.replofy
+.venv*
+data
+dist
+dist-server
+emulator_data
+firebase-debug.log
+node_modules
+npm-debug.log
+*.local
+*.log
+docs/replofy-os-current-ui.png

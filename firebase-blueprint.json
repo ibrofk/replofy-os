@@ -1,0 +1,120 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "A task in the execution scorecard",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the task" },
+        "status": { "type": "string", "enum": ["todo", "in-progress", "done", "icebox"] },
+        "effortPoints": { "type": "number", "enum": [1, 2, 3, 5, 8] },
+        "isLeadIndicator": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["title", "status", "effortPoints", "isLeadIndicator", "createdAt", "authorId"]
+    },
+    "Bug": {
+      "title": "Bug",
+      "description": "A tracked bug in the technical studio",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "status": { "type": "string", "enum": ["open", "triaged", "in-progress", "blocked", "resolved", "closed"] },
+        "resolutionNotes": { "type": "string" },
+        "linkedTaskIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["title", "description", "severity", "status", "resolutionNotes", "linkedTaskIds", "createdAt", "updatedAt", "authorId"]
+    },
+    "RoadmapItem": {
+      "title": "Roadmap Item",
+      "description": "A feature roadmap item in the technical studio",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "phase": { "type": "string", "enum": ["now", "next", "later"] },
+        "priority": { "type": "string", "enum": ["low", "medium", "high"] },
+        "status": { "type": "string", "enum": ["planned", "building", "blocked", "shipped"] },
+        "linkedTaskIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["title", "description", "phase", "priority", "status", "linkedTaskIds", "createdAt", "updatedAt", "authorId"]
+    },
+    "Prompt": {
+      "title": "Prompt",
+      "description": "An internal golden prompt",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "version": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["title", "version", "content", "createdAt", "authorId"]
+    },
+    "BusinessPlan": {
+      "title": "Business Plan",
+      "description": "A living markdown business plan for Replofy",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "content": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "review", "active", "archived"] },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["title", "summary", "content", "status", "tags", "createdAt", "updatedAt", "authorId"]
+    },
+    "Vision": {
+      "title": "Vision",
+      "description": "Weekly Identity Vision",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "focusItems": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "authorId": { "type": "string" }
+      },
+      "required": ["title", "description", "focusItems", "createdAt", "authorId"]
+    }
+  },
+  "firestore": {
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Tasks for the execution scorecard"
+    },
+    "/bugs/{bugId}": {
+      "schema": { "$ref": "#/entities/Bug" },
+      "description": "Tracked bugs and their resolutions"
+    },
+    "/roadmapItems/{roadmapItemId}": {
+      "schema": { "$ref": "#/entities/RoadmapItem" },
+      "description": "Feature roadmap items for the technical studio"
+    },
+    "/prompts/{promptId}": {
+      "schema": { "$ref": "#/entities/Prompt" },
+      "description": "Internal prompt bank"
+    },
+    "/business-plans/{planId}": {
+      "schema": { "$ref": "#/entities/BusinessPlan" },
+      "description": "Living business plan documents"
+    },
+    "/visions/{visionId}": {
+      "schema": { "$ref": "#/entities/Vision" },
+      "description": "Weekly identity visions"
+    }
+  }
+}

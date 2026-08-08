@@ -1,0 +1,471 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node --check scripts/dev-all.mjs
+      - run: node --check scripts/dev-standalone.mjs
+      - run: npm run check:public-surface
+      - run: npm run check:public-safety
+      - name: Prove a clean public root can be exported
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_root="$RUNNER_TEMP/replofy-public-root"
+          trap 'rm -rf -- "$public_root"' EXIT
+          npm run export:public-root -- --out "$public_root"
+          test ! -e "$public_root/.git"
+          test ! -e "$public_root/node_modules"
+          test ! -e "$public_root/.env"
+          git -C "$public_root" init --initial-branch=main
+          git -C "$public_root" config user.name "Replofy CI"
+          git -C "$public_root" config user.email "ci@replofy.invalid"
+          git -C "$public_root" add --all
+          git -C "$public_root" commit --no-gpg-sign --message "Initial clean public root"
+          (cd "$public_root" && npm run check:public-surface && npm run check:public-safety && npm run check:dependencies && npm run check:public-safety:history)
+      - run: npm run check:licenses
+      - run: npm run check:dependencies
+      - run: npm run lint
+      - run: npm run test:context-routing
+      - run: npm run test:standalone-client
+      - run: npm run test:asset-store
+      - run: npm run test:s3-asset-store
+      - run: npm run test:asset-store-contracts
+      - run: npm run test:event-bus
+      - run: npm run test:platform-contracts
+      - run: npm run test:server:http
+      - run: npm run test:mcp:hosted
+      - run: npm run test:postgres-cli
+      - run: npm run test:s3-client
+      - run: npm run test:server:config
+      - run: npm run server:build
+      - run: npm run build:firebase
+      - run: npm run build:standalone -- --manifest --outDir .tmp/standalone-verify
+      - run: npm run check:standalone-bundle
+
+  windows-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run preflight
+      - run: node --check scripts/dev-standalone.mjs
+      - run: npm run check:public-surface
+      - run: npm run check:public-safety
+      - run: npm run lint
+      - run: npm run test:server:config
+      - run: npm run test:server:http
+      - run: npm run server:build
+      - run: npm run build:standalone -- --manifest --outDir .tmp/standalone-windows
+      - run: npm run check:standalone-bundle -- .tmp/standalone-windows
+
+  postgres-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: replofy_test
+          POSTGRES_USER: replofy
+          POSTGRES_PASSWORD: replofy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U replofy -d replofy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://replofy:replofy@127.0.0.1:5432/replofy_test
+      BETTER_AUTH_SECRET: ci-auth-secret-at-least-thirty-two-characters
+      REPLOFY_BOOTSTRAP_TOKEN: ci-bootstrap-token-at-least-thirty-two-characters
+      REPLOFY_SERVER_URL: http://localhost:4100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migrate
+      - name: Prove live HTTP bootstrap, auth, CRUD, isolation, API keys, and database restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+          http_database='replofy_http_ci'
+          reconnect_fixture_file="$RUNNER_TEMP/replofy-http-reconnect.json"
+          docker exec "$postgres_container" dropdb --if-exists --maintenance-db=replofy_test --username=replofy "$http_database"
+          docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$http_database"
+          trap 'rm -f -- "$reconnect_fixture_file"; docker exec "$postgres_container" dropdb --if-exists --maintenance-db=replofy_test --username=replofy "$http_database"' EXIT
+          http_database_url="postgres://replofy:replofy@127.0.0.1:5432/$http_database"
+          DATABASE_URL="$http_database_url" npm run db:migrate
+          DATABASE_URL="$http_database_url" REPLOFY_PRESERVE_HTTP_FIXTURES=1 \
+          REPLOFY_HTTP_RECONNECT_FIXTURE_FILE="$reconnect_fixture_file" \
+          npm run test:server:http:integration
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+          before="$(docker exec "$postgres_container" psql --username=replofy --dbname="$http_database" --tuples-only --no-align --command="SELECT (SELECT count(*) FROM workspace) || '|' || (SELECT count(*) FROM task) || '|' || (SELECT count(*) FROM creative_asset);")"
+          test "$before" != '0|0|0'
+          docker restart "$postgres_container" >/dev/null
+          for attempt in {1..30}; do
+            if docker exec "$postgres_container" pg_isready --username=replofy --dbname="$http_database" >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              exit 1
+            fi
+            sleep 2
+          done
+          after="$(docker exec "$postgres_container" psql --username=replofy --dbname="$http_database" --tuples-only --no-align --command="SELECT (SELECT count(*) FROM workspace) || '|' || (SELECT count(*) FROM task) || '|' || (SELECT count(*) FROM creative_asset);")"
+          test "$before" = "$after"
+          DATABASE_URL="$http_database_url" \
+          REPLOFY_HTTP_RECONNECT_FIXTURE_FILE="$reconnect_fixture_file" \
+          REPLOFY_RECONNECT_SERVER_URL='http://127.0.0.1:4120' \
+          npm run test:server:database-reconnect
+      - name: Prove API process crash and restart persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+          recovery_database='replofy_recovery_ci'
+          docker exec "$postgres_container" dropdb --if-exists --maintenance-db=replofy_test --username=replofy "$recovery_database"
+          docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$recovery_database"
+          trap 'docker exec "$postgres_container" dropdb --if-exists --maintenance-db=replofy_test --username=replofy "$recovery_database"' EXIT
+          recovery_database_url="postgres://replofy:replofy@127.0.0.1:5432/$recovery_database"
+          DATABASE_URL="$recovery_database_url" npm run db:migrate
+          DATABASE_URL="$recovery_database_url" \
+          REPLOFY_RECOVERY_SERVER_URL='http://127.0.0.1:4110' \
+          REPLOFY_RECOVERY_DATA_DIR="$RUNNER_TEMP/replofy-recovery-assets" \
+          npm run test:server:recovery
+      - run: npm run test:server:integration
+      - name: Prove deterministic demo seed is idempotent
+        run: |
+          npm run seed:standalone
+          npm run seed:standalone
+      - name: Prove workspace JSON export excludes auth secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          export_file="$RUNNER_TEMP/replofy-workspace-export.json"
+          REPLOFY_EXPORT_FILE="$export_file" npm run export:standalone
+          jq -e '.format == "replofy-os-standalone-export" and (.workspaces | length) >= 2' "$export_file"
+          jq -e '(.tables.prompt | length) > 0 and (.tables.social_post | length) > 0 and (.tables.seo_keyword | length) > 0 and (.tables.feedback | length) > 0 and (.tables.time_block | length) > 0 and (.tables.week_marker | length) > 0' "$export_file"
+          if grep -Eiq '"(token_hash|key_hash|access_token|refresh_token|id_token|password|secret|secret_access_key|api_key|client_secret|private_key|session_token|bootstrap_token|database_url|cookie)"' "$export_file"; then
+            echo 'Export contains an auth secret field.' >&2
+            exit 1
+          fi
+      - name: Prove populated PostgreSQL backup and restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+
+          docker exec "$postgres_container" \
+            pg_dump --username=replofy --dbname=replofy_test \
+            --format=custom --no-owner --no-privileges \
+            --file=/tmp/replofy-os-ci.dump
+          docker exec "$postgres_container" sha256sum /tmp/replofy-os-ci.dump
+
+          docker exec "$postgres_container" \
+            createdb --username=replofy replofy_restore_ci
+          docker exec "$postgres_container" \
+            pg_restore --username=replofy --dbname=replofy_restore_ci \
+            --no-owner --no-privileges --exit-on-error --single-transaction \
+            /tmp/replofy-os-ci.dump
+
+          source_counts="$(docker exec "$postgres_container" \
+            psql --username=replofy --dbname=replofy_test --tuples-only --no-align \
+            --command="SELECT (SELECT count(*) FROM workspace), (SELECT count(*) FROM task), (SELECT count(*) FROM operator_output), (SELECT count(*) FROM operator_approval), (SELECT count(*) FROM creative_item), (SELECT count(*) FROM creative_asset), (SELECT count(*) FROM growth_account), (SELECT count(*) FROM lead), (SELECT count(*) FROM bug), (SELECT count(*) FROM roadmap_item), (SELECT count(*) FROM api_endpoint), (SELECT count(*) FROM environment), (SELECT count(*) FROM environment_deployment), (SELECT count(*) FROM business_plan), (SELECT count(*) FROM business_plan_editing_session), (SELECT count(*) FROM context_source), (SELECT count(*) FROM context_source_version), (SELECT count(*) FROM context_source_item), (SELECT count(*) FROM context_source_folder), (SELECT count(*) FROM prompt), (SELECT count(*) FROM social_post), (SELECT count(*) FROM seo_keyword), (SELECT count(*) FROM feedback), (SELECT count(*) FROM time_block), (SELECT count(*) FROM week_marker), (SELECT count(*) FROM chat_read_state), (SELECT count(*) FROM notification_read_state);")"
+          restored_counts="$(docker exec "$postgres_container" \
+            psql --username=replofy --dbname=replofy_restore_ci --tuples-only --no-align \
+            --command="SELECT (SELECT count(*) FROM workspace), (SELECT count(*) FROM task), (SELECT count(*) FROM operator_output), (SELECT count(*) FROM operator_approval), (SELECT count(*) FROM creative_item), (SELECT count(*) FROM creative_asset), (SELECT count(*) FROM growth_account), (SELECT count(*) FROM lead), (SELECT count(*) FROM bug), (SELECT count(*) FROM roadmap_item), (SELECT count(*) FROM api_endpoint), (SELECT count(*) FROM environment), (SELECT count(*) FROM environment_deployment), (SELECT count(*) FROM business_plan), (SELECT count(*) FROM business_plan_editing_session), (SELECT count(*) FROM context_source), (SELECT count(*) FROM context_source_version), (SELECT count(*) FROM context_source_item), (SELECT count(*) FROM context_source_folder), (SELECT count(*) FROM prompt), (SELECT count(*) FROM social_post), (SELECT count(*) FROM seo_keyword), (SELECT count(*) FROM feedback), (SELECT count(*) FROM time_block), (SELECT count(*) FROM week_marker), (SELECT count(*) FROM chat_read_state), (SELECT count(*) FROM notification_read_state);")"
+          test "$source_counts" = "$restored_counts"
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 5)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 6)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 7)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 8)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 9)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 10)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 11)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 12)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 13)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 14)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 15)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 16)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 17)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 18)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 19)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 20)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 21)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 22)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 23)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 24)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 25)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 26)" -gt 0
+          test "$(printf '%s' "$restored_counts" | cut -d '|' -f 27)" -gt 0
+      - name: Prove combined database and filesystem backup restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes --quiet postgresql-client
+          combined_root="$RUNNER_TEMP/replofy-combined-backup"
+          mkdir -p "$combined_root/assets"
+          printf 'combined-backup-proof\n' > "$combined_root/assets/release-marker.txt"
+          REPLOFY_DATA_DIR="$combined_root/assets" \
+          REPLOFY_BACKUP_DIR="$combined_root/bundles" \
+          npm run backup:standalone
+          bundle="$(find "$combined_root/bundles" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -f "$bundle/manifest.json"
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+          docker exec "$postgres_container" createdb --username=replofy replofy_combined_restore
+          DATABASE_URL=postgres://replofy:replofy@127.0.0.1:5432/replofy_combined_restore \
+          REPLOFY_DATA_DIR="$combined_root/restored-assets" \
+          npm run restore:standalone -- "$bundle" --confirm=RESTORE
+          cmp "$combined_root/assets/release-marker.txt" "$combined_root/restored-assets/release-marker.txt"
+      - name: Prove combined S3 database and object backup restore
+        shell: bash
+        env:
+          REPLOFY_ASSET_STORE: s3
+          REPLOFY_S3_ENDPOINT: http://127.0.0.1:9000
+          REPLOFY_S3_BUCKET: replofy-assets
+          REPLOFY_S3_ACCESS_KEY_ID: replofy-local
+          REPLOFY_S3_SECRET_ACCESS_KEY: replofy-local-change-me
+          REPLOFY_S3_REGION: us-east-1
+          REPLOFY_S3_FORCE_PATH_STYLE: "true"
+          REPLOFY_S3_FIXTURE_KEY: ci-workspace/release-marker.txt
+          REPLOFY_S3_FIXTURE_CONTENT: "s3-combined-backup-proof\n"
+        run: |
+          set -euo pipefail
+          docker run --detach --name replofy-minio-backup-ci --publish 9000:9000 \
+            --env MINIO_ROOT_USER=replofy-local \
+            --env MINIO_ROOT_PASSWORD=replofy-local-change-me \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          trap 'docker logs replofy-minio-backup-ci; docker rm --force replofy-minio-backup-ci' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              exit 1
+            fi
+            sleep 2
+          done
+          npm run seed:s3-fixture
+          combined_root="$RUNNER_TEMP/replofy-combined-s3-backup"
+          mkdir -p "$combined_root/assets"
+          printf 'filesystem-side-proof\n' > "$combined_root/assets/release-marker.txt"
+          REPLOFY_DATA_DIR="$combined_root/assets" \
+          REPLOFY_BACKUP_DIR="$combined_root/bundles" \
+          npm run backup:standalone
+          bundle="$(find "$combined_root/bundles" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -f "$bundle/manifest.json"
+          grep --fixed-strings --quiet '"assetStore": "s3"' "$bundle/manifest.json"
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+          docker exec "$postgres_container" createdb --username=replofy replofy_s3_restore_ci
+          DATABASE_URL=postgres://replofy:replofy@127.0.0.1:5432/replofy_s3_restore_ci \
+          REPLOFY_DATA_DIR="$combined_root/restored-assets" \
+          npm run restore:standalone -- "$bundle" --confirm=RESTORE
+          cmp "$combined_root/assets/release-marker.txt" "$combined_root/restored-assets/release-marker.txt"
+          npm run check:s3-fixture
+      - name: Prove prior-release upgrade and rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+          latest_migration="$(find drizzle -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort | tail -n 1)"
+          test -n "$latest_migration"
+          latest_tag="${latest_migration%.sql}"
+          prior_migrations="$RUNNER_TEMP/replofy-prior-migrations"
+          mkdir -p "$prior_migrations/meta"
+          while IFS= read -r migration; do
+            if [ "$migration" != "$latest_migration" ]; then
+              cp "drizzle/$migration" "$prior_migrations/$migration"
+            fi
+          done < <(find drizzle -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          jq --arg latest_tag "$latest_tag" \
+            '.entries = [.entries[] | select(.tag != $latest_tag)]' \
+            drizzle/meta/_journal.json > "$prior_migrations/meta/_journal.json"
+          prior_entry_count="$(jq '.entries | length' "$prior_migrations/meta/_journal.json")"
+          prior_database='replofy_prior_release_ci'
+          docker exec "$postgres_container" dropdb --if-exists --maintenance-db=replofy_test --username=replofy "$prior_database"
+          docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$prior_database"
+          prior_url="postgres://replofy:replofy@127.0.0.1:5432/$prior_database"
+          DATABASE_URL="$prior_url" REPLOFY_MIGRATIONS_FOLDER="$prior_migrations" \
+          npx tsx src/server/migrate.ts
+          applied_prior="$(psql "$prior_url" --tuples-only --no-align \
+            --command='SELECT count(*) FROM replofy_meta.migrations;')"
+          test "$applied_prior" -eq "$prior_entry_count"
+          psql "$prior_url" --command="CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint); INSERT INTO drizzle.__drizzle_migrations (hash, created_at) SELECT hash, created_at FROM replofy_meta.migrations ORDER BY created_at; DROP SCHEMA replofy_meta CASCADE;"
+          psql "$prior_url" --command="INSERT INTO workspace (id, name, slug) VALUES ('00000000-0000-0000-0000-000000000001', 'Prior Release', 'prior-release');"
+          prior_dump="$RUNNER_TEMP/replofy-prior-release.dump"
+          pg_dump "$prior_url" --format=custom --no-owner --no-privileges --file="$prior_dump"
+          DATABASE_URL="$prior_url" npx tsx src/server/migrate.ts
+          upgraded_context="$(psql "$prior_url" --tuples-only --no-align \
+            --command="SELECT (to_regclass('public.context_source') IS NOT NULL)::text;")"
+          test "$upgraded_context" = 't'
+          upgraded_workspace="$(psql "$prior_url" --tuples-only --no-align \
+            --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
+          test "$upgraded_workspace" -eq 1
+          upgraded_migrations="$(psql "$prior_url" --tuples-only --no-align \
+            --command='SELECT count(*) FROM replofy_meta.migrations;')"
+          test "$upgraded_migrations" -eq "$((prior_entry_count + 1))"
+          docker exec "$postgres_container" dropdb --maintenance-db=replofy_test --username=replofy "$prior_database"
+          docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$prior_database"
+          pg_restore --dbname="$prior_url" --no-owner --no-privileges --exit-on-error --single-transaction "$prior_dump"
+          rollback_context="$(psql "$prior_url" --tuples-only --no-align \
+            --command="SELECT (to_regclass('public.context_source') IS NULL)::text;")"
+          test "$rollback_context" = 't'
+          rollback_workspace="$(psql "$prior_url" --tuples-only --no-align \
+            --command='SELECT count(*) FROM workspace WHERE slug = '\''prior-release'\'';')"
+          test "$rollback_workspace" -eq 1
+      - name: Prove migrations remain idempotent after restore
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgres://replofy:replofy@127.0.0.1:5432/replofy_restore_ci
+      - name: Prove a clean packaged container can bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          postgres_container="$(docker ps --filter ancestor=postgres:18 --format '{{.ID}}' | head -n 1)"
+          test -n "$postgres_container"
+          docker exec "$postgres_container" \
+            createdb --username=replofy replofy_container_ci
+
+          docker build --tag replofy-os:ci .
+          docker run --detach --name replofy-os-ci --network host \
+            --env NODE_ENV=production \
+            --env SERVER_HOST=127.0.0.1 \
+            --env SERVER_PORT=4100 \
+            --env REPLOFY_SERVER_URL=http://127.0.0.1:4100 \
+            --env REPLOFY_TRUSTED_ORIGINS=http://127.0.0.1:4100 \
+            --env REPLOFY_SECURE_COOKIES=false \
+            --env DATABASE_URL=postgres://replofy:replofy@127.0.0.1:5432/replofy_container_ci \
+            --env BETTER_AUTH_SECRET=ci-container-auth-secret-at-least-thirty-two-characters \
+            --env REPLOFY_BOOTSTRAP_TOKEN=ci-container-bootstrap-token-at-least-thirty-two-characters \
+            replofy-os:ci
+          trap 'docker logs replofy-os-ci; docker rm --force replofy-os-ci' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4100/health/ready; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl --fail-with-body --silent \
+            --request POST http://127.0.0.1:4100/api/setup/bootstrap \
+            --header 'Content-Type: application/json' \
+            --data '{
+              "token": "ci-container-bootstrap-token-at-least-thirty-two-characters",
+              "name": "CI Owner",
+              "email": "container-ci@example.test",
+              "password": "container-ci-password-at-least-sixteen",
+              "workspaceName": "Container CI",
+              "workspaceSlug": "container-ci"
+            }'
+
+  s3-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:s3-client
+      - name: Run S3 integration against MinIO
+        shell: bash
+        env:
+          REPLOFY_S3_ENDPOINT: http://127.0.0.1:9000
+          REPLOFY_S3_BUCKET: replofy-assets
+          REPLOFY_S3_ACCESS_KEY_ID: replofy-local
+          REPLOFY_S3_SECRET_ACCESS_KEY: replofy-local-change-me
+          REPLOFY_S3_REGION: us-east-1
+          REPLOFY_S3_FORCE_PATH_STYLE: "true"
+        run: |
+          set -euo pipefail
+          docker run --detach --name replofy-minio-ci --publish 9000:9000 \
+            --env MINIO_ROOT_USER=replofy-local \
+            --env MINIO_ROOT_PASSWORD=replofy-local-change-me \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          trap 'docker logs replofy-minio-ci; docker rm --force replofy-minio-ci' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              exit 1
+            fi
+            sleep 2
+          done
+          npm run test:s3-integration
+          npm run test:s3-asset-store:integration
+
+  mcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --requirement mcp/requirements.txt
+      - run: python -m unittest discover -s mcp/tests -p "test_*.py"
+
+  firebase-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci
+      - run: npm run test:rules:creative-hub
+        env:
+          FIREBASE_PROJECT_ID: demo-replofy-os
+      - run: npm run test:rules:team-invitations
+        env:
+          FIREBASE_PROJECT_ID: demo-replofy-os

@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Replofy OS — Open Source Readiness Audit</title>
+  <!--
+    Audit assumptions
+    - The goal is a repository outsiders can run and contribute to, not merely public source visibility.
+    - The near-term release may remain Firebase-backed if it is described honestly as a developer preview.
+    - The durable target is cloud-optional self-hosting with local database, auth, files, API, and MCP.
+    - Findings reflect the working tree inspected on 23 July 2026; unrelated existing edits were preserved.
+  -->
+  <style>
+    :root {
+      --paper: #f2f0e9;
+      --paper-2: #e8e5dc;
+      --ink: #161616;
+      --muted: #68645d;
+      --line: #b8b2a6;
+      --soft-line: #d6d1c7;
+      --white: #fffefa;
+      --red: #c83f2b;
+      --red-soft: #f3d9d3;
+      --amber: #aa6818;
+      --amber-soft: #f4e5ca;
+      --green: #27644b;
+      --green-soft: #d7e6de;
+      --blue: #315b78;
+      --blue-soft: #dce7ed;
+      --display: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+      --body: "Trebuchet MS", "Gill Sans", Calibri, sans-serif;
+      --mono: Consolas, "Courier New", monospace;
+      --shadow: 0 18px 44px rgba(24, 22, 18, .08);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--body);
+      line-height: 1.6;
+    }
+    a { color: inherit; text-decoration-color: var(--line); text-underline-offset: .18em; }
+    a:hover { text-decoration-color: var(--red); }
+    button { font: inherit; }
+    code, .mono { font-family: var(--mono); }
+    img { display: block; max-width: 100%; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 0 3vw;
+      color: var(--white);
+      background: rgba(22, 22, 22, .96);
+      border-bottom: 1px solid #333;
+      backdrop-filter: blur(14px);
+    }
+    .topbar-brand { display: flex; align-items: center; gap: 13px; min-width: 0; }
+    .topbar-mark { width: 25px; height: 25px; object-fit: contain; filter: invert(1); }
+    .topbar-title { font-size: 12px; letter-spacing: .13em; text-transform: uppercase; white-space: nowrap; }
+    .topbar nav { display: flex; gap: 20px; overflow: auto; scrollbar-width: none; }
+    .topbar nav a { color: #d8d5ce; font-size: 11px; text-decoration: none; white-space: nowrap; }
+    .topbar nav a:hover { color: #fff; }
+
+    .hero {
+      min-height: 670px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(300px, .7fr);
+      border-bottom: 1px solid var(--line);
+    }
+    .hero-main {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 670px;
+      padding: clamp(50px, 8vw, 118px) clamp(28px, 6vw, 92px) 54px;
+      border-right: 1px solid var(--line);
+    }
+    .eyebrow {
+      margin: 0 0 26px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--red);
+    }
+    h1, h2, h3 { font-family: var(--display); font-weight: 400; text-wrap: balance; }
+    h1 {
+      max-width: 920px;
+      margin: 0;
+      font-size: clamp(58px, 8.6vw, 132px);
+      line-height: .88;
+      letter-spacing: -.055em;
+    }
+    .hero-deck {
+      max-width: 800px;
+      margin: 44px 0 0;
+      font-size: clamp(19px, 2vw, 28px);
+      line-height: 1.35;
+      text-wrap: pretty;
+    }
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 28px;
+      padding-top: 54px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .hero-side {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-width: 0;
+      background: var(--ink);
+      color: var(--white);
+    }
+    .verdict {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 50px clamp(30px, 4vw, 62px);
+    }
+    .verdict-number {
+      font-family: var(--display);
+      font-size: clamp(110px, 16vw, 220px);
+      line-height: .74;
+      letter-spacing: -.07em;
+      color: var(--white);
+    }
+    .verdict-number span { font-size: .2em; color: #8e8a83; letter-spacing: 0; }
+    .verdict-label { margin-top: 35px; font-family: var(--mono); font-size: 12px; color: #aaa59c; }
+    .verdict-copy { margin: 18px 0 0; max-width: 420px; font-size: 18px; line-height: 1.45; }
+    .status-strip {
+      padding: 22px clamp(30px, 4vw, 62px);
+      color: #260c08;
+      background: #e45a43;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .section {
+      padding: clamp(72px, 9vw, 132px) clamp(24px, 6vw, 92px);
+      border-bottom: 1px solid var(--line);
+    }
+    .section-dark { color: var(--white); background: var(--ink); border-color: #393939; }
+    .section-head {
+      display: grid;
+      grid-template-columns: 160px minmax(0, 1fr);
+      gap: clamp(20px, 5vw, 72px);
+      margin-bottom: 64px;
+      align-items: start;
+    }
+    .section-index { font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: .12em; text-transform: uppercase; }
+    .section-dark .section-index { color: #e97968; }
+    h2 { margin: 0; max-width: 920px; font-size: clamp(46px, 6vw, 84px); line-height: .98; letter-spacing: -.035em; }
+    .section-intro { max-width: 840px; margin: 25px 0 0; font-size: 20px; color: var(--muted); }
+    .section-dark .section-intro { color: #b9b5ad; }
+
+    .confidence {
+      display: inline-block;
+      margin-right: .55em;
+      font-family: var(--mono);
+      font-size: .68em;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      vertical-align: .12em;
+      color: var(--green);
+    }
+    .confidence.likely { color: var(--amber); }
+    .section-dark .confidence { color: #8cc1a8; }
+    .section-dark .confidence.likely { color: #e6b66c; }
+
+    .callout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr);
+      border-top: 2px solid var(--ink);
+      border-bottom: 1px solid var(--line);
+      background: var(--white);
+    }
+    .callout > div { padding: clamp(28px, 4vw, 52px); }
+    .callout > div + div { border-left: 1px solid var(--line); }
+    .callout h3 { margin: 0 0 18px; font-size: 32px; line-height: 1.05; }
+    .callout p { margin: 0; font-size: 18px; }
+    .no-go { color: var(--red); font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+      background: var(--white);
+    }
+    .metric {
+      min-height: 150px;
+      padding: 24px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .metric strong { display: block; font-family: var(--display); font-size: 54px; line-height: 1; font-weight: 400; letter-spacing: -.04em; }
+    .metric span { display: block; margin-top: 13px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 28px 232px; }
+    .filter {
+      padding: 8px 13px;
+      border: 1px solid var(--line);
+      border-radius: 0;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .filter:hover, .filter.active { color: var(--white); background: var(--ink); border-color: var(--ink); }
+
+    .findings { border-top: 1px solid var(--ink); }
+    .finding {
+      display: grid;
+      grid-template-columns: 72px 140px minmax(0, 1.15fr) minmax(260px, .85fr);
+      min-height: 170px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.22);
+    }
+    .finding[hidden] { display: none; }
+    .finding > div { padding: 26px 22px; }
+    .finding > div + div { border-left: 1px solid var(--soft-line); }
+    .finding-id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .severity { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .sev-p0 .severity { color: var(--red); }
+    .sev-p1 .severity { color: var(--amber); }
+    .sev-p2 .severity { color: var(--blue); }
+    .finding h3 { margin: 0 0 12px; font-family: var(--body); font-size: 19px; font-weight: 700; line-height: 1.25; }
+    .finding p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+    .evidence code { display: block; overflow-wrap: anywhere; font-size: 11px; color: #4f4b45; }
+    .evidence code + code { margin-top: 8px; }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: 1fr 110px 1fr;
+      gap: 0;
+      align-items: stretch;
+      margin-top: 50px;
+    }
+    .arch-panel { padding: 34px; border: 1px solid #4b4b4b; background: #202020; }
+    .arch-panel h3 { margin: 0 0 28px; font-size: 29px; }
+    .arch-flow { display: grid; gap: 12px; }
+    .arch-node {
+      padding: 15px 17px;
+      border: 1px solid #535353;
+      background: #171717;
+      font-size: 13px;
+    }
+    .arch-node small { display: block; margin-top: 3px; color: #aaa59d; }
+    .arch-node.risk { border-color: #8f382c; color: #f1b8ae; }
+    .arch-node.target { border-color: #39735a; color: #b4dcc8; }
+    .arch-arrow { display: grid; place-items: center; color: #8e8a82; font-family: var(--mono); font-size: 11px; text-align: center; }
+
+    .database-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-top: 40px;
+    }
+    .database-card { padding: 30px; border-top: 3px solid var(--ink); background: var(--white); box-shadow: var(--shadow); }
+    .database-card h3 { margin: 0 0 14px; font-size: 27px; }
+    .database-card p { margin: 0; color: var(--muted); }
+    .database-card ul { margin: 22px 0 0; padding: 0; list-style: none; }
+    .database-card li { padding: 10px 0; border-top: 1px solid var(--soft-line); font-size: 14px; }
+    .database-card li::before { content: "—"; margin-right: 10px; color: var(--red); }
+
+    .screenshot-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr);
+      gap: 34px;
+      margin-top: 55px;
+      align-items: start;
+    }
+    .screenshot-frame { padding: 10px; border: 1px solid var(--line); background: var(--white); box-shadow: var(--shadow); }
+    .screenshot-frame img { width: 100%; height: auto; border: 1px solid #ddd; }
+    .caption { margin-top: 12px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+    .failure-chain { counter-reset: chain; }
+    .failure-step { display: grid; grid-template-columns: 42px 1fr; gap: 15px; padding: 18px 0; border-top: 1px solid var(--line); }
+    .failure-step::before {
+      counter-increment: chain;
+      content: counter(chain, decimal-leading-zero);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--red);
+    }
+    .failure-step strong { display: block; margin-bottom: 5px; }
+    .failure-step span { color: var(--muted); font-size: 14px; }
+
+    .options {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid #4a4a4a;
+      border-left: 1px solid #4a4a4a;
+    }
+    .option { position: relative; padding: 34px; border-right: 1px solid #4a4a4a; border-bottom: 1px solid #4a4a4a; }
+    .option.recommended { background: #22342c; }
+    .option-tag { font-family: var(--mono); font-size: 10px; color: #b5b0a8; letter-spacing: .1em; text-transform: uppercase; }
+    .option h3 { min-height: 72px; margin: 20px 0 14px; font-size: 31px; }
+    .option p { min-height: 100px; color: #bcb8b0; font-size: 14px; }
+    .option dl { margin: 26px 0 0; }
+    .option dt { margin-top: 15px; font-family: var(--mono); font-size: 10px; color: #8e8a82; text-transform: uppercase; }
+    .option dd { margin: 3px 0 0; font-size: 13px; }
+    .option .decision { display: inline-block; margin-top: 28px; padding: 8px 11px; border: 1px solid currentColor; font-family: var(--mono); font-size: 10px; text-transform: uppercase; }
+    .decision.reject { color: #ed8272; }
+    .decision.choose { color: #9dd1b7; }
+    .decision.later { color: #e6bf7f; }
+
+    .roadmap { display: grid; gap: 0; border-top: 1px solid var(--ink); }
+    .phase {
+      display: grid;
+      grid-template-columns: 140px minmax(0, .85fr) minmax(320px, 1.15fr);
+      border-bottom: 1px solid var(--line);
+    }
+    .phase > div { padding: 30px 24px; }
+    .phase > div + div { border-left: 1px solid var(--soft-line); }
+    .phase-num { font-family: var(--display); font-size: 54px; line-height: 1; }
+    .phase h3 { margin: 0 0 8px; font-size: 26px; }
+    .phase p { margin: 0; color: var(--muted); font-size: 14px; }
+    .phase ul { margin: 0; padding-left: 18px; font-size: 14px; }
+    .phase li + li { margin-top: 7px; }
+    .gate { display: block; margin-top: 17px; font-family: var(--mono); font-size: 10px; color: var(--green); text-transform: uppercase; }
+
+    .dod {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0;
+      border-top: 1px solid var(--line);
+      border-left: 1px solid var(--line);
+    }
+    .dod-item { display: flex; gap: 14px; padding: 21px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--white); }
+    .dod-check { flex: 0 0 auto; width: 18px; height: 18px; border: 1px solid var(--ink); margin-top: 3px; }
+    .dod-item strong { display: block; font-size: 14px; }
+    .dod-item span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+
+    .sources { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 34px; margin-top: 40px; }
+    .source { padding: 14px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    .source code { display: block; margin-top: 3px; color: var(--muted); overflow-wrap: anywhere; }
+    .footnote { max-width: 850px; margin-top: 42px; color: var(--muted); font-size: 13px; }
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 34px clamp(24px, 6vw, 92px);
+      color: #aaa59d;
+      background: var(--ink);
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    @media (max-width: 1080px) {
+      .hero { grid-template-columns: 1fr; }
+      .hero-main { border-right: 0; }
+      .hero-side { grid-template-columns: 1fr auto; grid-template-rows: auto; }
+      .verdict { min-height: 380px; }
+      .status-strip { display: flex; align-items: center; max-width: 220px; }
+      .metrics { grid-template-columns: repeat(3, 1fr); }
+      .finding { grid-template-columns: 58px 105px 1fr; }
+      .finding .evidence { grid-column: 3; border-left: 1px solid var(--soft-line); border-top: 1px solid var(--soft-line); }
+      .architecture { grid-template-columns: 1fr; gap: 18px; }
+      .arch-arrow { min-height: 64px; }
+      .options { grid-template-columns: 1fr; }
+      .option h3, .option p { min-height: 0; }
+    }
+    @media (max-width: 760px) {
+      .topbar nav { display: none; }
+      .hero-main { min-height: 610px; }
+      .hero-side { grid-template-columns: 1fr; }
+      .status-strip { max-width: none; }
+      .section-head { grid-template-columns: 1fr; gap: 14px; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .filters { margin-left: 0; }
+      .finding { grid-template-columns: 54px 1fr; }
+      .finding .severity-cell { grid-column: 2; }
+      .finding .finding-copy, .finding .evidence { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--soft-line); }
+      .database-grid, .screenshot-layout, .callout, .dod, .sources { grid-template-columns: 1fr; }
+      .callout > div + div { border-left: 0; border-top: 1px solid var(--line); }
+      .phase { grid-template-columns: 72px 1fr; }
+      .phase > div:nth-child(3) { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--soft-line); }
+      .footer { flex-direction: column; }
+    }
+    @media print {
+      .topbar, .filters { display: none; }
+      body { background: white; }
+      .hero, .section { break-after: auto; }
+      .finding, .phase, .option, .database-card { break-inside: avoid; }
+      .section-dark { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-brand">
+      <img class="topbar-mark" src="../src/assets/logo-compact.png" alt="Replofy">
+      <span class="topbar-title">Open Source Readiness</span>
+    </div>
+    <nav aria-label="Report sections">
+      <a href="#verdict">Verdict</a>
+      <a href="#option-c-status">Option C status</a>
+      <a href="#evidence">Evidence</a>
+      <a href="#bottlenecks">Bottlenecks</a>
+      <a href="#database">Database</a>
+      <a href="#decision">Decision</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#definition">Definition of done</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" id="verdict">
+      <div class="hero-main">
+        <div>
+          <p class="eyebrow">Replofy OS / historical repository audit / 23 July 2026</p>
+          <h1>Historical baseline: public source was not yet self-hostable.</h1>
+          <p class="hero-deck"><span class="confidence">Certain</span>At the 23 July 2026 snapshot, a fresh clone could not reproduce a useful local workspace without Firebase identity, emulator state, platform assumptions, and external services. See the Option C status panel below for the current working tree.</p>
+        </div>
+        <div class="hero-meta">
+          <span>Scope: 23 July 2026 working-tree snapshot</span>
+          <span>Method: static evidence + bounded runtime checks</span>
+          <span>Independent reviews: architecture / database / OSS readiness</span>
+        </div>
+      </div>
+      <aside class="hero-side" aria-label="Readiness verdict">
+        <div class="verdict">
+          <div class="verdict-number">32<span>/100</span></div>
+          <div class="verdict-label">Self-hosting readiness — directional score</div>
+          <p class="verdict-copy"><span class="confidence likely">Likely</span>Good internal product surface; weak external reproducibility. The gap is mostly platformization, not UI polish.</p>
+        </div>
+        <div class="status-strip">Historical baseline: do not label that snapshot “self-hostable”</div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div class="section-index">00 / Decision</div>
+        <div>
+          <h2>Open source in two releases, not one big reveal.</h2>
+          <p class="section-intro"><span class="confidence likely">Likely</span>The lowest-risk route is a credible Firebase-backed developer preview first, followed by a cloud-optional self-hosted edition after the persistence and storage boundaries exist.</p>
+        </div>
+      </div>
+      <div class="callout">
+        <div>
+          <h3>The uncomfortable answer</h3>
+          <p><span class="confidence">Certain</span>If you make the repository public now and call it self-hostable, early adopters will become unpaid integration testers for assumptions that currently live only on your machine. That creates support debt before community trust.</p>
+        </div>
+        <div>
+          <div class="no-go">Recommendation</div>
+          <p style="margin-top:14px"><strong>Prepare publicly; launch conditionally.</strong><br>Ship a developer preview only after one-command local boot, seed data, dev auth, security fixes, license, and CI are proven from a clean clone.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-dark" id="option-c-status">
+      <div class="section-head">
+        <div class="section-index">00A / Option C status</div>
+        <div>
+          <h2>The audit is historical; the implementation is now in verification.</h2>
+          <p class="section-intro"><span class="confidence">Certain</span>This report preserves the 23 July 2026 baseline so the original gaps remain traceable. The current working tree adds the durable Option C substrate; primary release gates are historical-ref cleanup, service-backed CI evidence, and human provenance/privacy sign-off, while the matrix tracks cross-adapter and full transport-parity follow-up evidence. See <code>docs/option-c-completion-matrix.md</code> for the current ledger.</p>
+        </div>
+      </div>
+      <div class="dod">
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Implemented</strong><span>Standalone Node server, PostgreSQL schema and migrations, local auth, workspace isolation, API keys, and SSE events.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Implemented</strong><span>Filesystem and S3-compatible AssetStore drivers, opt-in MinIO Compose profile, and combined database/asset backup restore.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Implemented</strong><span>Deterministic idempotent seed, workspace-scoped JSON export with auth-secret filtering, upgrade/rollback rehearsal, and standalone Strategy surfaces.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Contract boundaries implemented</strong><span>WorkspaceRepository, AuthProvider, AIProvider, AssetStore, and WorkspaceEventBus are explicit; standalone data services now depend on the repository capability interface. Filesystem/S3 AssetStore fixtures pass; persistence and auth cross-adapter fixtures remain.</span></div></div>
+          <div class="dod-item"><span class="dod-check"></span><div><strong>Locally verified</strong><span>Public-surface, typecheck, public-safety, license and dependency-policy scans, standalone and Firebase builds, asset-store tests, injected AI-provider and no-key Gemini fallback tests, API-client tests, hosted MCP protocol smoke, installed-dependency MCP dispatch, HTTP-stub plus stdio transport tests, and bundle boundary checks pass.</span></div></div>
+          <div class="dod-item"><span class="dod-check"></span><div><strong>Pre-publication blocker</strong><span>The opt-in history scan reports legacy Firebase config and key material in reachable refs; rotate and scrub it, or publish from a new clean repository history. Application CI rehearses the clean-root initial-history scan separately.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Human sign-off required</strong><span>Asset ownership, logo/trademark permission, third-party license provenance, and deployment-specific privacy/retention terms are documented but not machine-proven.</span></div></div>
+          <div class="dod-item"><span class="dod-check"></span><div><strong>CI required</strong><span>PostgreSQL integration, container-restart persistence with a fresh API reconnect, forced API-process recovery, Docker bootstrap, MinIO object restore, prior-release upgrade/rollback, Firebase rules, and installed-dependency MCP smoke tests.</span></div></div>
+      </div>
+    </section>
+
+    <section class="section" id="evidence">
+      <div class="section-head">
+        <div class="section-index">01 / Evidence</div>
+        <div>
+          <h2>The repository is broad, active, and still internally shaped.</h2>
+          <p class="section-intro"><span class="confidence">Certain</span>The codebase contains a real product, two MCP paths, a sizeable API, and extensive Firestore rules. Its public-project surface--portable scripts, canonical data model, governance, CI, release metadata--is much thinner.</p>
+        </div>
+      </div>
+      <div class="metrics" aria-label="Repository evidence snapshot">
+        <div class="metric"><strong>155</strong><span>tracked files in the audited working tree</span></div>
+        <div class="metric"><strong>120</strong><span>TypeScript / TSX source files</span></div>
+        <div class="metric"><strong>45</strong><span>top-level Firestore rule collections</span></div>
+        <div class="metric"><strong>19</strong><span>live collections loaded at company startup</span></div>
+        <div class="metric"><strong>6</strong><span>entities in the checked-in Firebase blueprint</span></div>
+        <div class="metric"><strong>0</strong><span>GitHub workflow files found</span></div>
+      </div>
+      <div class="screenshot-layout">
+        <figure class="screenshot-frame">
+          <img src="replofy-os-current-ui.png" alt="Replofy OS local sign-in screen with emulator warning">
+          <figcaption class="caption">Observed local UI at 127.0.0.1:4000. The application renders, detects emulator mode, and stops at Google sign-in rather than entering a seeded local workspace.</figcaption>
+        </figure>
+        <div class="failure-chain">
+          <div class="failure-step"><div><strong>Clone and install</strong><span>The README lists Node.js, but local operation also needs Java, Firebase tooling, and a second long-running process.</span></div></div>
+          <div class="failure-step"><div><strong>Start the app</strong><span><code>npm run dev</code> points Firebase clients at ports 8081 and 9099 but does not start those emulators.</span></div></div>
+          <div class="failure-step"><div><strong>Start emulators</strong><span>The script embeds one Windows JDK path and imports ignored local state.</span></div></div>
+          <div class="failure-step"><div><strong>Authenticate</strong><span>The only visible login path is Google popup; there is no explicit one-click local user.</span></div></div>
+          <div class="failure-step"><div><strong>Use the workspace</strong><span>No committed deterministic seed guarantees a company, user, tasks, prompts, operator desks, or representative content.</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="bottlenecks">
+      <div class="section-head">
+        <div class="section-index">02 / Bottlenecks</div>
+        <div>
+          <h2>Fix trust breakers before convenience issues.</h2>
+          <p class="section-intro"><span class="confidence">Certain</span>P0 items make the current release unsafe or unreproducible. P1 items prevent credible self-hosting or create immediate scale and maintenance debt.</p>
+        </div>
+      </div>
+      <div class="filters" aria-label="Filter findings">
+        <button class="filter active" data-filter="all">All findings</button>
+        <button class="filter" data-filter="p0">P0</button>
+        <button class="filter" data-filter="p1">P1</button>
+        <button class="filter" data-filter="local">Local run</button>
+        <button class="filter" data-filter="data">Database</button>
+        <button class="filter" data-filter="security">Security</button>
+        <button class="filter" data-filter="oss">OSS hygiene</button>
+      </div>
+      <div class="findings">
+        <article class="finding sev-p0" data-tags="p0 local">
+          <div class="finding-id">01</div><div class="severity-cell"><span class="severity">P0 · Local</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>The documented boot path is incomplete</h3><p><code>npm run dev</code> starts Vite only. Both browser and server code are configured to use Firebase emulators that must be started separately.</p></div>
+          <div class="evidence"><code>README.md:11–21</code><code>src/firebase.ts:11–26</code><code>vite.config.ts:56–62</code></div>
+        </article>
+        <article class="finding sev-p0" data-tags="p0 local">
+          <div class="finding-id">02</div><div class="severity-cell"><span class="severity">P0 · Portable</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Core scripts are machine- and shell-specific</h3><p>The emulator and several test commands embed an exact Windows JDK installation. The clean script uses Unix <code>rm -rf</code>.</p></div>
+          <div class="evidence"><code>package.json:8, 11, 17, 19–20</code></div>
+        </article>
+        <article class="finding sev-p0" data-tags="p0 data local">
+          <div class="finding-id">03</div><div class="severity-cell"><span class="severity">P0 · Identity</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Your production Firebase identity is a default</h3><p>Project ID, app ID, storage bucket, named database, deploy target, and Admin fallbacks couple forks to the original Replofy environment.</p></div>
+          <div class="evidence"><code>firebase-applet-config.json:2–8</code><code>firebase.json:15–19</code><code>src/services/apiKeyServer.ts:56–57</code><code>package.json:13</code></div>
+        </article>
+        <article class="finding sev-p0" data-tags="p0 data local">
+          <div class="finding-id">04</div><div class="severity-cell"><span class="severity">P0 · Data</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>No canonical schema, migration, seed, or reset path</h3><p>The emulator command imports <code>emulator_data</code>, but that directory is ignored. The blueprint covers only six entities while rules reference 45 top-level collections.</p></div>
+          <div class="evidence"><code>.gitignore:6–7</code><code>package.json:8</code><code>firebase-blueprint.json:2–119</code><code>firestore.rules:688–836</code></div>
+        </article>
+        <article class="finding sev-p0" data-tags="p0 security">
+          <div class="finding-id">05</div><div class="severity-cell"><span class="severity">P0 · Security</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Gemini spend can be triggered without workspace authorization</h3><p>The public handler accepts requests without Firebase ID-token or API-key enforcement. Its limiter is process memory, so serverless instances do not share quota state.</p></div>
+          <div class="evidence"><code>api/gemini.ts:21–40</code><code>src/services/geminiServer.ts:296–308</code></div>
+        </article>
+        <article class="finding sev-p0" data-tags="p0 security">
+          <div class="finding-id">06</div><div class="severity-cell"><span class="severity">P0 · Roles</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>First-user admin bootstrap is client-controlled</h3><p>The client creates a new profile with <code>master-admin</code>; Firestore rules allow an owner profile create without a role whitelist.</p></div>
+          <div class="evidence"><code>src/App.tsx:87–95</code><code>firestore.rules:662–669, 695–700</code></div>
+        </article>
+        <article class="finding sev-p0" data-tags="p0 security data">
+          <div class="finding-id">07</div><div class="severity-cell"><span class="severity">P0 · Tenant data</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Every authenticated user can read every business plan</h3><p>The parent business-plan rule checks only authentication, not author or company membership. Its editing-session child rule is correctly scoped, which makes the parent inconsistency especially clear.</p></div>
+          <div class="evidence"><code>firestore.rules:823–833</code></div>
+        </article>
+        <article class="finding sev-p0" data-tags="p0 oss">
+          <div class="finding-id">08</div><div class="severity-cell"><span class="severity">P0 · License</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>There is no repository-level license grant</h3><p>The package is still named <code>react-example</code>, private, and version 0.0.0. No root LICENSE, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, or CI workflow is tracked.</p></div>
+          <div class="evidence"><code>package.json:2–5</code><code>repository inventory / git ls-files</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 data">
+          <div class="finding-id">09</div><div class="severity-cell"><span class="severity">P1 · Coupling</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Firestore is embedded across the React application</h3><p>Pages, hooks, contexts, and services import Firebase directly. PostgreSQL is therefore a refactor across both UI and server behavior—not an environment-variable swap.</p></div>
+          <div class="evidence"><code>src/contexts/GlobalStateContext.tsx:64–170</code><code>src/pages/OnboardingPage.tsx:34–60</code><code>37 frontend files identified by database audit</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 local">
+          <div class="finding-id">10</div><div class="severity-cell"><span class="severity">P1 · Hosting</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Vercel is the only production server adapter</h3><p>A static Vite build cannot serve API, OAuth, MCP, Gemini, or signed asset routes. Local middleware and Vercel functions are the only complete runtime paths.</p></div>
+          <div class="evidence"><code>vite.config.ts:69–268</code><code>vercel.json:3–59</code><code>api/v1/index.ts:4–78</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 data local">
+          <div class="finding-id">11</div><div class="severity-cell"><span class="severity">P1 · Files</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Hosted compatibility still retains provider-specific adapters</h3><p>The Firebase adapter remains Cloudinary-bound for the hosted compatibility build, while standalone uploads use a filesystem or S3-compatible AssetStore. Standalone backups export and restore configured S3 objects, and the standalone JSON export excludes auth secrets.</p></div>
+          <div class="evidence"><code>src/types.ts:390, 433–438</code><code>src/services/creativeAssetServer.ts:132–161, 239–289</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 data">
+          <div class="finding-id">12</div><div class="severity-cell"><span class="severity">P1 · Indexes</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>No Firestore index manifest is committed</h3><p>Compound queries exist, but there is no <code>firestore.indexes.json</code>. A clean Firebase project may fail only when a contributor opens a particular screen.</p></div>
+          <div class="evidence"><code>src/components/widgets/InternalPromptBankWidget.tsx:16–24</code><code>repository inventory</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 data local">
+          <div class="finding-id">13</div><div class="severity-cell"><span class="severity">P1 · Env contract</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Documented configuration is not consistently loaded</h3><p><code>FIREBASE_DATABASE_ID</code> is documented but missing from Vite’s server environment hydration list. Browser Firebase configuration cannot be supplied by environment variables because it imports committed JSON directly.</p></div>
+          <div class="evidence"><code>.env.example:9–20</code><code>vite.config.ts:33–54</code><code>src/firebase.ts:4</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 oss local">
+          <div class="finding-id">14</div><div class="severity-cell"><span class="severity">P1 · MCP</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>The standalone MCP defaults to internal paths and production</h3><p>The skill registry assumes a sibling private directory, docs show a local machine path, and the default API base URL points at the hosted Replofy deployment.</p></div>
+          <div class="evidence"><code>mcp/replofy_os_mcp_server.py:575, 742–744, 1828</code><code>mcp/README.md:108–125, 149–160</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 data">
+          <div class="finding-id">15</div><div class="severity-cell"><span class="severity">P1 · Cost</span></div>
+          <div class="finding-copy"><h3><span class="confidence likely">Likely</span>App startup will become a Firestore cost and latency hotspot</h3><p>The global state opens 18 or 19 unbounded realtime subscriptions and sorts full result sets client-side before the application reports loaded.</p></div>
+          <div class="evidence"><code>src/contexts/GlobalStateContext.tsx:100–170</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 oss">
+          <div class="finding-id">16</div><div class="severity-cell"><span class="severity">P1 · Quality</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>There is no fast, observable release gate</h3><p>No CI is tracked. In bounded local checks, typecheck exceeded 60 seconds, build exceeded 90 seconds, and the MCP smoke test failed when its Python dependencies were not installed.</p></div>
+          <div class="evidence"><code>package.json:12, 21</code><code>mcp/requirements.txt:1–2</code><code>bounded audit execution</code></div>
+        </article>
+        <article class="finding sev-p1" data-tags="p1 security oss">
+          <div class="finding-id">17</div><div class="severity-cell"><span class="severity">P1 · Privacy</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Data lifecycle and AI-provider disclosure are absent</h3><p>The product stores identity, company, chat, lead, context, plan, and asset data; uploaded document content is sent to Gemini. No privacy, retention, deletion/export, subprocessor, or telemetry policy is tracked.</p></div>
+          <div class="evidence"><code>contextIngestionService.ts:472</code><code>geminiServer.ts:884</code><code>firestore.rules:700, 707</code><code>repository inventory</code></div>
+        </article>
+        <article class="finding sev-p2" data-tags="p2 local">
+          <div class="finding-id">18</div><div class="severity-cell"><span class="severity">P2 · Dev UX</span></div>
+          <div class="finding-copy"><h3><span class="confidence">Certain</span>Ports and file watching are collision-prone</h3><p>Vite can auto-increment from 4000 to 4001, while Firebase Emulator UI also claims 4001. Existing logs show Vite reloading for ignored virtual-environment HTML files.</p></div>
+          <div class="evidence"><code>firebase.json:9–12</code><code>package.json:7</code><code>.tmp-os-dev.out.log / growth-dev.out.log</code></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section section-dark" id="database">
+      <div class="section-head">
+        <div class="section-index">03 / Database</div>
+        <div>
+          <h2>The database problem is boundaries, not Firebase itself.</h2>
+          <p class="section-intro"><span class="confidence">Certain</span>The fastest credible release can keep Firebase. The durable release needs to stop letting presentation components own persistence before any PostgreSQL migration begins.</p>
+        </div>
+      </div>
+      <div class="architecture" aria-label="Current and target persistence architecture">
+        <div class="arch-panel">
+          <h3>Current shape</h3>
+          <div class="arch-flow">
+            <div class="arch-node">React pages, contexts, hooks<small>direct Firebase imports and CRUD</small></div>
+            <div class="arch-node risk">Firebase Web SDK<small>Auth + named Firestore database</small></div>
+            <div class="arch-node">Vite middleware / Vercel functions<small>Admin SDK, OAuth, MCP, Gemini, asset signing</small></div>
+            <div class="arch-node risk">Cloudinary + Gemini<small>required external behavior for complete feature set</small></div>
+          </div>
+        </div>
+        <div class="arch-arrow">Extract contracts<br>→<br>preserve adapters</div>
+        <div class="arch-panel">
+          <h3>Target shape</h3>
+          <div class="arch-flow">
+            <div class="arch-node target">React application<small>API client + query/cache layer only</small></div>
+            <div class="arch-node target">Application services<small>WorkspaceRepository · AuthProvider · AssetStore · AIProvider</small></div>
+            <div class="arch-node target">Adapter choice<small>Firebase preview or PostgreSQL self-host</small></div>
+            <div class="arch-node target">Local platform<small>Postgres + MinIO/filesystem + local auth + optional AI</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div class="section-index">03A / Data plan</div>
+        <div>
+          <h2>Make local data boring, deterministic, and disposable.</h2>
+          <p class="section-intro"><span class="confidence likely">Likely</span>The first goal is not “replace Firebase.” It is “prove a complete workspace from zero state, repeatedly, without production credentials.”</p>
+        </div>
+      </div>
+      <div class="database-grid">
+        <div class="database-card">
+          <h3>Fast track · Firebase preview</h3>
+          <p>Retain current behavior while removing founder-specific state.</p>
+          <ul>
+            <li>Use an emulator-only demo project ID</li>
+            <li>Commit sanitized Auth + Firestore seed fixtures</li>
+            <li>Add idempotent seed and reset commands</li>
+            <li>Add a one-click local user and workspace</li>
+            <li>Commit Firestore indexes and test rules</li>
+            <li>Generate config from environment variables</li>
+          </ul>
+        </div>
+        <div class="database-card">
+          <h3>Durable track · PostgreSQL</h3>
+          <p>Build a true self-hosting substrate without a flag-day rewrite.</p>
+          <ul>
+            <li>Define repository and provider contracts first</li>
+            <li>Move writes and reads behind application services</li>
+            <li>Design tenant keys, foreign keys, and audit fields</li>
+            <li>Version SQL migrations and seed fixtures</li>
+            <li>Replace realtime listeners with SSE or WebSockets</li>
+            <li>Provide backup, restore, and upgrade commands</li>
+          </ul>
+        </div>
+        <div class="database-card">
+          <h3>Schema authority</h3>
+          <p>Pick one executable source of truth. The current blueprint, TypeScript types, API configuration, and Firestore rules have already drifted apart.</p>
+          <ul>
+            <li>Schema produces migrations, validators, and types</li>
+            <li>Runtime writes validate at the service boundary</li>
+            <li>Rules/policies are generated or contract-tested</li>
+            <li>Every new collection/table requires a migration</li>
+          </ul>
+        </div>
+        <div class="database-card">
+          <h3>Files and AI</h3>
+          <p>Local usefulness should degrade gracefully when optional providers are absent.</p>
+          <ul>
+            <li>Filesystem driver for local assets</li>
+            <li>S3-compatible driver with MinIO in Compose</li>
+            <li>Cloudinary remains an optional adapter</li>
+            <li>AIProvider interface with disabled/mock mode</li>
+            <li>Quotas and authentication before provider calls</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-dark" id="decision">
+      <div class="section-head">
+        <div class="section-index">04 / Options</div>
+        <div>
+          <h2>Choose the release promise before choosing the license.</h2>
+          <p class="section-intro"><span class="confidence likely">Likely</span>Your most important product decision is whether the first public release promises transparency, contributor development, or full self-hosting. Those are different products.</p>
+        </div>
+      </div>
+      <div class="options">
+        <article class="option">
+          <div class="option-tag">Option A · Immediate</div>
+          <h3>Publish the current repository</h3>
+          <p>Fastest visibility, weakest first-run experience. Community attention is spent discovering local assumptions rather than improving the product.</p>
+          <dl>
+            <dt>Upside</dt><dd>Immediate transparency and signal</dd>
+            <dt>Downside</dt><dd>Security exposure, support burden, trust loss</dd>
+            <dt>Reversibility</dt><dd>Low once secrets/history and expectations are public</dd>
+          </dl>
+          <span class="decision reject">Reject</span>
+        </article>
+        <article class="option recommended">
+          <div class="option-tag">Option B · Recommended first release</div>
+          <h3>Firebase-backed developer preview</h3>
+          <p>Make a clean clone work locally with no cloud credentials, keep Firebase as the documented implementation, and label provider dependencies honestly.</p>
+          <dl>
+            <dt>Upside</dt><dd>Shortest path to a credible community release</dd>
+            <dt>Downside</dt><dd>Not yet cloud-agnostic or production self-hostable</dd>
+            <dt>Reversibility</dt><dd>High; adapters can evolve behind stable contracts</dd>
+          </dl>
+          <span class="decision choose">Choose now</span>
+        </article>
+        <article class="option">
+          <div class="option-tag">Option C · Durable destination</div>
+          <h3>Postgres self-hosted edition</h3>
+          <p>Provide a standalone server, migrations, local auth, S3-compatible assets, backups, upgrades, and cloud-optional providers.</p>
+          <dl>
+            <dt>Upside</dt><dd>Real ownership, portability, and ecosystem potential</dd>
+            <dt>Downside</dt><dd>Largest engineering and maintenance commitment</dd>
+            <dt>Reversibility</dt><dd>Medium; becomes a supported platform contract</dd>
+          </dl>
+          <span class="decision later">Build in stages</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="roadmap">
+      <div class="section-head">
+        <div class="section-index">05 / Roadmap</div>
+        <div>
+          <h2>Sequence work by trust, then portability, then scale.</h2>
+          <p class="section-intro"><span class="confidence likely">Likely</span>This order reduces the most uncertainty with the least irreversible work. It also creates a usable public milestone before the full database migration is complete.</p>
+        </div>
+      </div>
+      <div class="roadmap">
+        <article class="phase">
+          <div class="phase-num">0</div>
+          <div><h3>Contain risk</h3><p>Do before any public mirror or announcement.</p></div>
+          <div><ul><li>Scan the full Git history for secrets and sensitive data; rotate anything questionable.</li><li>Authenticate Gemini; replace client-controlled first-admin bootstrap.</li><li>Inventory code, image, generated asset, brand, and dataset provenance.</li><li>Choose the license and trademark policy with counsel if the business model depends on hosted resale.</li></ul><span class="gate">Exit gate · safe to expose history and artifacts</span></div>
+        </article>
+        <article class="phase">
+          <div class="phase-num">1</div>
+          <div><h3>One-command local</h3><p>Make the first 15 minutes reliable.</p></div>
+          <div><ul><li>Add cross-platform <code>dev:all</code>, preflight checks, strict ports, health checks, and clean shutdown.</li><li>Use a demo Firebase project; remove production IDs and machine paths from defaults.</li><li>Commit sanitized seed fixtures, local login, reset, and representative workspace data.</li><li>Make Cloudinary and Gemini optional in local mode with explicit disabled states.</li></ul><span class="gate">Exit gate · clean Linux and Windows clones pass first-run smoke</span></div>
+        </article>
+        <article class="phase">
+          <div class="phase-num">2</div>
+          <div><h3>Public project surface</h3><p>Turn a code dump into a maintainable project.</p></div>
+          <div><ul><li>Add LICENSE, README rewrite, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, SUPPORT, and governance.</li><li>Rename and version the package; add repository metadata, changelog, and release policy.</li><li>Add CI for typecheck, unit, rules, API integration, clean bootstrap, secret scan, and license scan.</li><li>Publish a support matrix and “not supported yet” section.</li></ul><span class="gate">Exit gate · developer preview release candidate</span></div>
+        </article>
+        <article class="phase">
+          <div class="phase-num">3</div>
+          <div><h3>Extract platform contracts</h3><p>Create seams without changing behavior first.</p></div>
+          <div><ul><li>Introduce WorkspaceRepository, AuthProvider, AssetStore, AIProvider, and EventBus boundaries.</li><li>Move direct component writes behind application services and an API/query client.</li><li>Add standalone Node server, health endpoints, Dockerfile, and Compose.</li><li>Add filesystem and S3-compatible asset drivers; retain Firebase and Cloudinary adapters.</li></ul><span class="gate">Exit gate · Vercel and local server pass the same contract tests</span></div>
+        </article>
+        <article class="phase">
+          <div class="phase-num">4</div>
+          <div><h3>Self-hosted v1</h3><p>Earn the label with operational proof.</p></div>
+          <div><ul><li>Implement PostgreSQL schema and versioned migrations behind the repository contract.</li><li>Replace global realtime fan-out with bounded queries and explicit realtime transport.</li><li>Add backup, restore, upgrade, rollback, data export, and multi-tenant isolation tests.</li><li>Dogfood a fresh installation and upgrade from the previous tagged release.</li></ul><span class="gate">Exit gate · self-hosting definition of done passes in CI</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="definition">
+      <div class="section-head">
+        <div class="section-index">06 / Definition</div>
+        <div>
+          <h2>“Self-hostable” needs an executable definition.</h2>
+          <p class="section-intro"><span class="confidence likely">Likely</span>Do not ship the label until these outcomes are automated. Documentation alone is too easy to let drift.</p>
+        </div>
+      </div>
+      <div class="dod">
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Clean clone, one command</strong><span>Linux and Windows; no founder-specific paths.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>No cloud credentials required</strong><span>Optional providers can be disabled without breaking the core.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Local identity is ready</strong><span>A seeded user enters a seeded workspace without external OAuth.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Representative CRUD persists</strong><span>Tasks, goals, content, operators, chat, and assets survive restart.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>API and both MCP paths work</strong><span>Contract tests cover local and hosted adapters.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Files work locally</strong><span>Filesystem or MinIO/S3 without Cloudinary.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Empty-database bootstrap passes</strong><span>Migrations, seed, indexes, and policies are reproducible.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Upgrade and rollback are proven</strong><span>Backup, restore, migration, and prior-release upgrade run in CI.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Security gates are automated</strong><span>Secret, dependency, license, auth, and tenant-isolation checks.</span></div></div>
+        <div class="dod-item"><span class="dod-check"></span><div><strong>Support promise is explicit</strong><span>Supported versions, platforms, response expectations, and non-goals.</span></div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div class="section-index">07 / Evidence map</div>
+        <div>
+          <h2>Start here when turning findings into issues.</h2>
+          <p class="section-intro"><span class="confidence">Certain</span>These files carry most of the open-source readiness risk and should anchor the first milestone.</p>
+        </div>
+      </div>
+      <div class="sources">
+        <div class="source"><strong>Local scripts and project metadata</strong><code>package.json</code></div>
+        <div class="source"><strong>Contributor first-run promise</strong><code>README.md · .env.example</code></div>
+        <div class="source"><strong>Firebase identity and emulator topology</strong><code>firebase-applet-config.json · firebase.json · .firebaserc</code></div>
+        <div class="source"><strong>Client emulator wiring</strong><code>src/firebase.ts</code></div>
+        <div class="source"><strong>Server environment and local route emulation</strong><code>vite.config.ts · src/services/apiKeyServer.ts</code></div>
+        <div class="source"><strong>Authorization and data constraints</strong><code>firestore.rules</code></div>
+        <div class="source"><strong>Global read behavior</strong><code>src/contexts/GlobalStateContext.tsx</code></div>
+        <div class="source"><strong>REST data surface</strong><code>src/services/externalApiServer.ts</code></div>
+        <div class="source"><strong>AI cost and request behavior</strong><code>api/gemini.ts · src/services/geminiServer.ts</code></div>
+        <div class="source"><strong>Asset provider coupling</strong><code>src/services/creativeAssetServer.ts · src/types.ts</code></div>
+        <div class="source"><strong>Hosted runtime adapters</strong><code>api/ · vercel.json</code></div>
+        <div class="source"><strong>Standalone MCP portability</strong><code>mcp/replofy_os_mcp_server.py · mcp/README.md</code></div>
+      </div>
+      <p class="footnote">Audit limitation: the bottleneck and evidence cards preserve the 23 July 2026 snapshot; see “Option C status” above for the current implementation update. Service-backed PostgreSQL, MinIO, Firebase rules, and installed-dependency MCP checks still require CI or an equivalent environment. The opt-in Git-history scan is currently red on legacy refs; history rewrite or a clean public mirror, third-party license review, and legal ownership of every asset require human sign-off before publication.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Replofy OS · Open Source Readiness Audit</span>
+    <span>Evidence over optimism · 23 July 2026</span>
+  </footer>
+
+  <script>
+    const buttons = Array.from(document.querySelectorAll('.filter'));
+    const findings = Array.from(document.querySelectorAll('.finding'));
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        buttons.forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        const filter = button.dataset.filter;
+        findings.forEach((finding) => {
+          const tags = (finding.dataset.tags || '').split(/\s+/);
+          finding.hidden = filter !== 'all' && !tags.includes(filter);
+        });
+      });
+    });
+  </script>
+</body>
+</html>

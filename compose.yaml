@@ -1,0 +1,68 @@
+name: replofy-os
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: replofy
+      POSTGRES_USER: replofy
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replofy-local-change-me}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U replofy -d replofy"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - type: bind
+        source: ${REPLOFY_POSTGRES_DATA:-./.replofy/postgres}
+        target: /var/lib/postgresql
+
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 4100
+      REPLOFY_SERVER_URL: ${REPLOFY_SERVER_URL:-http://localhost:4100}
+      REPLOFY_TRUSTED_ORIGINS: ${REPLOFY_TRUSTED_ORIGINS:-http://localhost:4100}
+      REPLOFY_SECURE_COOKIES: ${REPLOFY_SECURE_COOKIES:-false}
+      REPLOFY_INVITATION_TTL_HOURS: ${REPLOFY_INVITATION_TTL_HOURS:-168}
+      REPLOFY_ASSET_STORE: ${REPLOFY_ASSET_STORE:-filesystem}
+      REPLOFY_S3_ENDPOINT: ${REPLOFY_S3_ENDPOINT:-http://minio:9000}
+      REPLOFY_S3_BUCKET: ${REPLOFY_S3_BUCKET:-replofy-assets}
+      REPLOFY_S3_ACCESS_KEY_ID: ${REPLOFY_S3_ACCESS_KEY_ID:-replofy-local}
+      REPLOFY_S3_SECRET_ACCESS_KEY: ${REPLOFY_S3_SECRET_ACCESS_KEY:-replofy-local-change-me}
+      REPLOFY_S3_REGION: ${REPLOFY_S3_REGION:-us-east-1}
+      REPLOFY_S3_FORCE_PATH_STYLE: ${REPLOFY_S3_FORCE_PATH_STYLE:-true}
+      REPLOFY_S3_CREATE_BUCKET: ${REPLOFY_S3_CREATE_BUCKET:-false}
+      DATABASE_URL: postgres://replofy:${POSTGRES_PASSWORD:-replofy-local-change-me}@postgres:5432/replofy
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET to at least 32 random characters}
+      REPLOFY_BOOTSTRAP_TOKEN: ${REPLOFY_BOOTSTRAP_TOKEN:?Set REPLOFY_BOOTSTRAP_TOKEN to at least 32 random characters}
+      REPLOFY_DATA_DIR: /var/lib/replofy
+    ports:
+      - "${REPLOFY_PORT:-4100}:4100"
+    volumes:
+      - type: bind
+        source: ${REPLOFY_APP_DATA:-./.replofy/data}
+        target: /var/lib/replofy
+
+  minio:
+    profiles: [s3]
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${REPLOFY_S3_ACCESS_KEY_ID:-replofy-local}
+      MINIO_ROOT_PASSWORD: ${REPLOFY_S3_SECRET_ACCESS_KEY:-replofy-local-change-me}
+    ports:
+      - "${REPLOFY_S3_PORT:-9000}:9000"
+      - "${REPLOFY_S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - type: bind
+        source: ${REPLOFY_S3_DATA:-./.replofy/minio}
+        target: /data

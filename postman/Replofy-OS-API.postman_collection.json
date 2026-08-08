@@ -1,0 +1,394 @@
+{
+  "info": {
+    "_postman_id": "2f0d3fd4-c086-4d92-88ba-cd5dd8f3b4f0",
+    "name": "Replofy OS API",
+    "description": "External API collection for Replofy OS. Configure {{baseUrl}} and {{apiKey}} first.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "apiKey", "value": "ros_live_replace_me" },
+    { "key": "resource", "value": "tasks" },
+    { "key": "recordId", "value": "replace-me" },
+    { "key": "environmentId", "value": "replace-me" },
+    { "key": "invitationId", "value": "replace-me" },
+    { "key": "sessionBearer", "value": "replace-firebase-id-token" }
+  ],
+  "item": [
+    {
+      "name": "Discovery",
+      "item": [
+        {
+          "name": "API Index",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1"
+          }
+        },
+        {
+          "name": "Generic List Resource",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/{{resource}}?limit=50"
+          }
+        },
+        {
+          "name": "Generic Get Resource",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/{{resource}}/{{recordId}}"
+          }
+        },
+        {
+          "name": "Generic Create Resource",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Replace with a resource-specific payload\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/{{resource}}"
+          }
+        },
+        {
+          "name": "Generic Update Resource",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated value\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/{{resource}}/{{recordId}}"
+          }
+        },
+        {
+          "name": "Generic Delete Resource",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/{{resource}}/{{recordId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workspace",
+      "item": [
+        {
+          "name": "List Tasks",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/tasks?limit=50"
+          }
+        },
+        {
+          "name": "Create Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Ship the MCP server\",\n  \"effortPoints\": 5,\n  \"isLeadIndicator\": true,\n  \"status\": \"todo\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "Update Task",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"in-progress\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/tasks/{{recordId}}"
+          }
+        },
+        {
+          "name": "List Prompts",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/prompts?limit=50"
+          }
+        },
+        {
+          "name": "Create Prompt",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Deploy summary prompt\",\n  \"version\": \"v1.0\",\n  \"content\": \"Summarize the latest deployment state and next actions.\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/prompts"
+          }
+        },
+        {
+          "name": "Weekly Changelog",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/reports/changelog?week=current"
+          }
+        },
+        {
+          "name": "Start Next Cycle",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/cycles/start-next"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Systems",
+      "item": [
+        {
+          "name": "List Environments",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/environments"
+          }
+        },
+        {
+          "name": "Deploy Environment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/environments/{{environmentId}}/deploy"
+          }
+        },
+        {
+          "name": "Rollback Environment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/environments/{{environmentId}}/rollback"
+          }
+        },
+        {
+          "name": "List API Endpoints",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/api-endpoints?limit=50"
+          }
+        },
+        {
+          "name": "Create API Endpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"POST\",\n  \"path\": \"/api/v1/context-ingestions\",\n  \"description\": \"Import new context documents into Replofy.\",\n  \"status\": \"active\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/api-endpoints"
+          }
+        },
+        {
+          "name": "Extract Context Payload",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"strategy.md\",\n  \"mimeType\": \"text/markdown\",\n  \"content\": \"# Strategy\\n\\nShip the Replofy MCP server and publish the operator docs.\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/context-ingestions/extract"
+          }
+        },
+        {
+          "name": "Ingest Context Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"strategy.md\",\n  \"mimeType\": \"text/markdown\",\n  \"content\": \"# Strategy\\n\\nShip the Replofy MCP server and publish the operator docs.\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/context-ingestions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Identity",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/users?limit=50"
+          }
+        },
+        {
+          "name": "List Companies",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/companies"
+          }
+        },
+        {
+          "name": "Update Current Company",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Replofy Labs\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/companies/{{recordId}}"
+          }
+        },
+        {
+          "name": "List Invitations",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/invitations?limit=50"
+          }
+        },
+        {
+          "name": "Create Invitation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"operator@example.com\",\n  \"role\": \"member\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/invitations"
+          }
+        },
+        {
+          "name": "Delete Invitation",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "x-api-key", "value": "{{apiKey}}" }
+            ],
+            "url": "{{baseUrl}}/api/v1/invitations/{{invitationId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "API Keys",
+      "item": [
+        {
+          "name": "List API Keys",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{sessionBearer}}" }
+            ],
+            "url": "{{baseUrl}}/api/api-keys"
+          }
+        },
+        {
+          "name": "Create API Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{sessionBearer}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"MCP Operator\",\n  \"scopes\": [\"workspace:read\", \"workspace:write\", \"systems:read\", \"systems:write\", \"identity:read\", \"identity:write\"]\n}"
+            },
+            "url": "{{baseUrl}}/api/api-keys"
+          }
+        },
+        {
+          "name": "Revoke API Key",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{sessionBearer}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"keyId\": \"replace-key-id\"\n}"
+            },
+            "url": "{{baseUrl}}/api/api-keys"
+          }
+        }
+      ]
+    }
+  ]
+}

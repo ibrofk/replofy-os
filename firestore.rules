@@ -1,0 +1,837 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Get user profile to check company
+    function getUserData() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : null;
+    }
+    
+    // Check if user belongs to the company
+    function isCompanyMember(companyId) {
+      return isAuthenticated() && companyId != null && getUserData() != null && 'companyId' in getUserData() && getUserData().companyId == companyId;
+    }
+
+    // Check if user is an admin of the company
+    function isCompanyAdmin(companyId) {
+      return isAuthenticated() && companyId != null && getUserData() != null && 'companyId' in getUserData() && getUserData().companyId == companyId && 'role' in getUserData() && getUserData().role in ['master-admin', 'master admin', 'master_admin', 'admin'];
+    }
+
+    // Check if user can access the document (either owner or company member)
+    function canAccessDoc() {
+      return isAuthenticated() && (
+        ('companyId' in resource.data && resource.data.companyId != null && isCompanyMember(resource.data.companyId)) ||
+        (resource.data.authorId == request.auth.uid)
+      );
+    }
+
+    // Check if user can create the document (must set their own authorId, and if companyId is set, must be their company)
+    function canCreateDoc() {
+      return isAuthenticated() && 
+        request.resource.data.authorId == request.auth.uid &&
+        (!('companyId' in request.resource.data) || request.resource.data.companyId == null || isCompanyMember(request.resource.data.companyId));
+    }
+
+    function uidUnchanged() {
+      return !('authorId' in request.resource.data) ||
+        request.resource.data.authorId == request.auth.uid;
+    }
+    function uidNotModified() {
+      return !('authorId' in request.resource.data) ||
+        request.resource.data.authorId == resource.data.authorId;
+    }
+    function companyIdNotModified() {
+      return !('companyId' in request.resource.data) ||
+        request.resource.data.companyId == resource.data.companyId;
+    }
+
+    function canUpdateBusinessPlan() {
+      return isAuthenticated() && (
+        (('authorId' in resource.data) && resource.data.authorId == request.auth.uid) ||
+        (!('authorId' in resource.data) && request.resource.data.authorId == request.auth.uid) ||
+        (('companyId' in resource.data) && resource.data.companyId != null && isCompanyMember(resource.data.companyId)) ||
+        ((!('companyId' in resource.data) || resource.data.companyId == null) &&
+          ('companyId' in request.resource.data) &&
+          request.resource.data.companyId != null &&
+          isCompanyMember(request.resource.data.companyId))
+      );
+    }
+
+    function validBusinessPlanImmutableFields() {
+      return request.resource.data.authorId is string &&
+        (
+          (('authorId' in resource.data) && request.resource.data.authorId == resource.data.authorId) ||
+          (!('authorId' in resource.data) && request.resource.data.authorId == request.auth.uid)
+        ) &&
+        request.resource.data.createdAt is string &&
+        (
+          (('createdAt' in resource.data) && request.resource.data.createdAt == resource.data.createdAt) ||
+          (!('createdAt' in resource.data))
+        ) &&
+        (
+          (('companyId' in resource.data) && resource.data.companyId != null && request.resource.data.companyId == resource.data.companyId) ||
+          ((!('companyId' in resource.data) || resource.data.companyId == null) &&
+            (
+              !('companyId' in request.resource.data) ||
+              request.resource.data.companyId == null ||
+              isCompanyMember(request.resource.data.companyId)
+            ))
+        );
+    }
+
+    function getBusinessPlanData(planId) {
+      return exists(/databases/$(database)/documents/businessPlans/$(planId))
+        ? get(/databases/$(database)/documents/businessPlans/$(planId)).data
+        : null;
+    }
+
+    function canAccessBusinessPlan(planId) {
+      return isAuthenticated() &&
+        getBusinessPlanData(planId) != null &&
+        (
+          getBusinessPlanData(planId).authorId == request.auth.uid ||
+          (
+            getBusinessPlanData(planId).companyId != null &&
+            isCompanyMember(getBusinessPlanData(planId).companyId)
+          )
+        );
+    }
+
+    function isValidBusinessPlanEditingSession(planId) {
+      return hasOnlyAllowedFields(['sessionId', 'userId', 'displayName', 'color', 'planId', 'activeBlockId', 'createdAt', 'updatedAt']) &&
+             request.resource.data.sessionId is string &&
+             request.resource.data.userId is string &&
+             request.resource.data.userId == request.auth.uid &&
+             validStringLength('sessionId', 1, 160) &&
+             validStringLength('displayName', 1, 120) &&
+             validStringLength('color', 4, 16) &&
+             request.resource.data.planId is string &&
+             request.resource.data.planId == planId &&
+             request.resource.data.activeBlockId is string &&
+             request.resource.data.activeBlockId.size() >= 1 &&
+             request.resource.data.activeBlockId.size() <= 160 &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             (
+               !('createdAt' in resource.data) ||
+               request.resource.data.createdAt == resource.data.createdAt
+             );
+    }
+    
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    function isValidTask() {
+      return hasOnlyAllowedFields(['title', 'status', 'effortPoints', 'isLeadIndicator', 'createdAt', 'completedAt', 'authorId', 'companyId', 'cycleGoalId', 'assigneeId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             validStringLength('title', 1, 200) &&
+             request.resource.data.status in ['todo', 'in-progress', 'done', 'icebox'] &&
+             request.resource.data.effortPoints in [1, 2, 3, 5, 8] &&
+             request.resource.data.isLeadIndicator is bool &&
+             request.resource.data.createdAt is string &&
+             (!('completedAt' in request.resource.data) || request.resource.data.completedAt == null || request.resource.data.completedAt is string) &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string) &&
+             (!('cycleGoalId' in request.resource.data) || request.resource.data.cycleGoalId == null || request.resource.data.cycleGoalId is string) &&
+             (!('assigneeId' in request.resource.data) || request.resource.data.assigneeId == null || request.resource.data.assigneeId is string);
+    }
+
+    function isValidBug() {
+      return hasOnlyAllowedFields(['title', 'description', 'severity', 'status', 'resolutionNotes', 'linkedTaskIds', 'codeLinks', 'createdAt', 'updatedAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             validStringLength('title', 1, 200) &&
+             validStringLength('description', 0, 8000) &&
+             request.resource.data.severity in ['low', 'medium', 'high', 'critical'] &&
+             request.resource.data.status in ['open', 'triaged', 'in-progress', 'blocked', 'resolved', 'closed'] &&
+             validStringLength('resolutionNotes', 0, 8000) &&
+             request.resource.data.linkedTaskIds is list &&
+             request.resource.data.linkedTaskIds.size() <= 25 &&
+             (!('codeLinks' in request.resource.data) || (request.resource.data.codeLinks is list && request.resource.data.codeLinks.size() <= 25)) &&
+             (!('sourceIds' in request.resource.data) || request.resource.data.sourceIds is list) &&
+             (!('sourceVersionIds' in request.resource.data) || request.resource.data.sourceVersionIds is list) &&
+             (!('sourceKey' in request.resource.data) || request.resource.data.sourceKey is string) &&
+             (!('sourceTitle' in request.resource.data) || request.resource.data.sourceTitle is string) &&
+             (!('sourceVersion' in request.resource.data) || request.resource.data.sourceVersion is number) &&
+             (!('sourceUpdatedAt' in request.resource.data) || request.resource.data.sourceUpdatedAt == null || request.resource.data.sourceUpdatedAt is string) &&
+             (!('aliases' in request.resource.data) || request.resource.data.aliases is list) &&
+             (!('matchKey' in request.resource.data) || request.resource.data.matchKey is string) &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidRoadmapItem() {
+      return hasOnlyAllowedFields(['title', 'description', 'phase', 'priority', 'status', 'linkedTaskIds', 'createdAt', 'updatedAt', 'authorId', 'companyId']) &&
+             validStringLength('title', 1, 200) &&
+             validStringLength('description', 0, 8000) &&
+             request.resource.data.phase in ['now', 'next', 'later'] &&
+             request.resource.data.priority in ['low', 'medium', 'high'] &&
+             request.resource.data.status in ['planned', 'building', 'blocked', 'shipped'] &&
+             request.resource.data.linkedTaskIds is list &&
+             request.resource.data.linkedTaskIds.size() <= 25 &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidPrompt() {
+      return hasOnlyAllowedFields(['title', 'version', 'content', 'createdAt', 'authorId', 'companyId']) &&
+             validStringLength('title', 1, 100) &&
+             validStringLength('version', 1, 20) &&
+             validStringLength('content', 1, 5000) &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidBusinessPlan() {
+      return hasOnlyAllowedFields(['title', 'summary', 'content', 'status', 'tags', 'links', 'contentRevision', 'blockMap', 'createdAt', 'updatedAt', 'authorId', 'companyId']) &&
+             validStringLength('title', 1, 120) &&
+             validStringLength('summary', 0, 1000) &&
+             validStringLength('content', 0, 50000) &&
+             request.resource.data.status in ['draft', 'review', 'active', 'archived'] &&
+             request.resource.data.tags is list &&
+             request.resource.data.tags.size() <= 20 &&
+             (!('links' in request.resource.data) || (request.resource.data.links is list && request.resource.data.links.size() <= 50)) &&
+             (!('contentRevision' in request.resource.data) || (request.resource.data.contentRevision is number && request.resource.data.contentRevision >= 0)) &&
+             (!('blockMap' in request.resource.data) || (request.resource.data.blockMap is list && request.resource.data.blockMap.size() <= 2000)) &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidVision() {
+      return hasOnlyAllowedFields(['title', 'description', 'focusItems', 'createdAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             validStringLength('title', 1, 100) &&
+             validStringLength('description', 1, 2000) &&
+             request.resource.data.focusItems is list &&
+             request.resource.data.focusItems.size() <= 20 &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidCycleGoal() {
+      return hasOnlyAllowedFields(['title', 'description', 'status', 'createdAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             validStringLength('title', 1, 100) &&
+             validStringLength('description', 1, 2000) &&
+             request.resource.data.status in ['active', 'completed', 'archived'] &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidWeekMarker() {
+      return hasOnlyAllowedFields(['weekNumber', 'startedAt', 'endedAt', 'status', 'createdAt', 'authorId', 'companyId']) &&
+             request.resource.data.weekNumber is number &&
+             request.resource.data.weekNumber >= 1 &&
+             request.resource.data.weekNumber <= 13 &&
+             request.resource.data.startedAt is string &&
+             (!('endedAt' in request.resource.data) || request.resource.data.endedAt == null || request.resource.data.endedAt is string) &&
+             request.resource.data.status in ['active', 'completed', 'upcoming'] &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidFeedback() {
+      return hasOnlyAllowedFields(['source', 'content', 'sentiment', 'createdAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             request.resource.data.source in ['Discord', 'Twitter', 'Email'] &&
+             validStringLength('content', 1, 2000) &&
+             request.resource.data.sentiment in ['positive', 'neutral', 'negative'] &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidAccount() {
+      return hasOnlyAllowedFields(['name', 'website', 'industry', 'size', 'notes', 'status', 'linkedLeadIds', 'createdAt', 'updatedAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             validStringLength('name', 1, 200) &&
+             validStringLength('website', 0, 500) &&
+             validStringLength('industry', 0, 120) &&
+             validStringLength('size', 0, 120) &&
+             validStringLength('notes', 0, 8000) &&
+             request.resource.data.status in ['prospect', 'customer', 'partner', 'inactive'] &&
+             request.resource.data.linkedLeadIds is list &&
+             request.resource.data.linkedLeadIds.size() <= 200 &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidLead() {
+      return hasOnlyAllowedFields(['name', 'email', 'companyName', 'accountId', 'source', 'stage', 'priority', 'ownerId', 'nextAction', 'nextActionAt', 'notes', 'linkedTaskIds', 'createdAt', 'updatedAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             validStringLength('name', 1, 200) &&
+             validStringLength('email', 0, 320) &&
+             validStringLength('companyName', 0, 200) &&
+             (!('accountId' in request.resource.data) || request.resource.data.accountId == null || request.resource.data.accountId is string) &&
+             request.resource.data.source in ['inbound', 'referral', 'cold-outreach', 'waitlist', 'twitter', 'linkedin', 'email', 'other'] &&
+             request.resource.data.stage in ['new', 'qualified', 'contacted', 'demo-booked', 'proposal', 'won', 'lost'] &&
+             request.resource.data.priority in ['low', 'medium', 'high'] &&
+             (!('ownerId' in request.resource.data) || request.resource.data.ownerId == null || request.resource.data.ownerId is string) &&
+             validStringLength('nextAction', 0, 500) &&
+             (!('nextActionAt' in request.resource.data) || request.resource.data.nextActionAt == null || request.resource.data.nextActionAt is string) &&
+             validStringLength('notes', 0, 8000) &&
+             request.resource.data.linkedTaskIds is list &&
+             request.resource.data.linkedTaskIds.size() <= 100 &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidCreativeItem() {
+      return hasOnlyAllowedFields(['title', 'platform', 'format', 'campaign', 'audience', 'objective', 'hook', 'brief', 'caption', 'visualDirection', 'productionNotes', 'cta', 'status', 'ownerId', 'approverId', 'targetPublishAt', 'scheduledFor', 'publishedAt', 'submittedAt', 'approvalNotes', 'assetIds', 'tags', 'createdAt', 'updatedAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             validStringLength('title', 1, 200) &&
+             request.resource.data.platform in ['Instagram', 'LinkedIn', 'X', 'TikTok', 'YouTube', 'Blog', 'Email', 'Other'] &&
+             request.resource.data.format in ['single-post', 'carousel', 'reel', 'story-sequence', 'motion-brief', 'static-ad', 'thread', 'other'] &&
+             request.resource.data.status in ['idea', 'brief', 'draft', 'in-review', 'changes-requested', 'approved', 'scheduled', 'published', 'rejected', 'archived'] &&
+             request.resource.data.assetIds is list &&
+             request.resource.data.assetIds.size() <= 100 &&
+             request.resource.data.tags is list &&
+             request.resource.data.tags.size() <= 50 &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidCreativeAsset() {
+      return hasOnlyAllowedFields(['id', 'creativeId', 'title', 'fileName', 'mimeType', 'fileSize', 'assetType', 'storagePath', 'provider', 'cloudinaryAssetId', 'cloudinaryResourceType', 'cloudinaryDeliveryType', 'cloudinaryVersion', 'cloudinaryFormat', 'status', 'uploadedAt', 'createdAt', 'updatedAt', 'authorId', 'companyId']) &&
+             (!('id' in request.resource.data) || request.resource.data.id is string) &&
+             (!('creativeId' in request.resource.data) || request.resource.data.creativeId == null || request.resource.data.creativeId is string) &&
+             validStringLength('title', 1, 160) &&
+             validStringLength('fileName', 1, 220) &&
+             validStringLength('mimeType', 1, 160) &&
+             request.resource.data.fileSize is number &&
+             request.resource.data.fileSize > 0 &&
+             request.resource.data.fileSize <= 262144000 &&
+             request.resource.data.assetType in ['image', 'video', 'document', 'source', 'other'] &&
+             validStringLength('storagePath', 1, 500) &&
+             (!('provider' in request.resource.data) || request.resource.data.provider == 'cloudinary') &&
+             (!('cloudinaryAssetId' in request.resource.data) || request.resource.data.cloudinaryAssetId == null || request.resource.data.cloudinaryAssetId is string) &&
+             (!('cloudinaryResourceType' in request.resource.data) || request.resource.data.cloudinaryResourceType == null || request.resource.data.cloudinaryResourceType in ['image', 'video', 'raw']) &&
+             (!('cloudinaryDeliveryType' in request.resource.data) || request.resource.data.cloudinaryDeliveryType == null || request.resource.data.cloudinaryDeliveryType == 'authenticated') &&
+             (!('cloudinaryVersion' in request.resource.data) || request.resource.data.cloudinaryVersion == null || request.resource.data.cloudinaryVersion is number) &&
+             (!('cloudinaryFormat' in request.resource.data) || request.resource.data.cloudinaryFormat == null || request.resource.data.cloudinaryFormat is string) &&
+             request.resource.data.status in ['uploading', 'active', 'archived', 'error'] &&
+             (!('uploadedAt' in request.resource.data) || request.resource.data.uploadedAt == null || request.resource.data.uploadedAt is string) &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isCreativeAdminForRequest() {
+      return isAuthenticated() && (
+        (
+          'companyId' in request.resource.data &&
+          request.resource.data.companyId != null &&
+          isCompanyAdmin(request.resource.data.companyId)
+        ) ||
+        (
+          (!('companyId' in request.resource.data) || request.resource.data.companyId == null) &&
+          request.resource.data.authorId == request.auth.uid
+        )
+      );
+    }
+
+    function isCreativeAdminForExisting() {
+      return isAuthenticated() && (
+        (
+          'companyId' in resource.data &&
+          resource.data.companyId != null &&
+          isCompanyAdmin(resource.data.companyId)
+        ) ||
+        (
+          (!('companyId' in resource.data) || resource.data.companyId == null) &&
+          resource.data.authorId == request.auth.uid
+        )
+      );
+    }
+
+    function isMemberEditableCreativeStatus(status) {
+      return status in ['idea', 'brief', 'draft', 'in-review', 'archived'];
+    }
+
+    function canCreateCreativeItem() {
+      return isCreativeAdminForRequest() || (
+        isMemberEditableCreativeStatus(request.resource.data.status) &&
+        request.resource.data.approverId == null &&
+        request.resource.data.approvalNotes == '' &&
+        request.resource.data.scheduledFor == null &&
+        request.resource.data.publishedAt == null
+      );
+    }
+
+    function canMemberUpdateCreativeItem() {
+      return (
+        (
+          resource.data.status in ['idea', 'brief', 'draft', 'in-review', 'changes-requested'] &&
+          isMemberEditableCreativeStatus(request.resource.data.status)
+        ) ||
+        (
+          resource.data.status == 'changes-requested' &&
+          request.resource.data.status == 'changes-requested'
+        )
+      ) &&
+      areImmutableFieldsUnchanged(['approverId', 'approvalNotes', 'scheduledFor', 'publishedAt']);
+    }
+
+    function getCreativeItemData(creativeId) {
+      return exists(/databases/$(database)/documents/creativeItems/$(creativeId))
+        ? get(/databases/$(database)/documents/creativeItems/$(creativeId)).data
+        : null;
+    }
+
+    function canAccessCreativeItem(creativeId) {
+      return isAuthenticated() &&
+        getCreativeItemData(creativeId) != null &&
+        (
+          getCreativeItemData(creativeId).authorId == request.auth.uid ||
+          (
+            getCreativeItemData(creativeId).companyId != null &&
+            isCompanyMember(getCreativeItemData(creativeId).companyId)
+          )
+        );
+    }
+
+    function isValidSocialPost() {
+      return hasOnlyAllowedFields(['platform', 'content', 'scheduledFor', 'status', 'createdAt', 'authorId', 'companyId', 'sourceIds', 'sourceVersionIds', 'sourceKey', 'sourceTitle', 'sourceVersion', 'sourceUpdatedAt', 'aliases', 'matchKey']) &&
+             request.resource.data.platform in ['Twitter', 'LinkedIn', 'Loom'] &&
+             validStringLength('content', 1, 5000) &&
+             request.resource.data.scheduledFor is string &&
+             request.resource.data.status in ['draft', 'scheduled', 'published'] &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidContextSource() {
+      return hasOnlyAllowedFields(['title', 'normalizedTitle', 'aliases', 'sourceKey', 'latestVersion', 'latestFileName', 'latestMimeType', 'latestSummary', 'linkedTaskIds', 'linkedVisionIds', 'linkedCycleGoalIds', 'linkedFeedbackIds', 'linkedSocialPostIds', 'linkedCreativeItemIds', 'linkedLeadIds', 'linkedAccountIds', 'createdAt', 'updatedAt', 'lastUploadedAt', 'authorId', 'companyId', 'status', 'folderId']) &&
+             validStringLength('title', 1, 200) &&
+             validStringLength('normalizedTitle', 1, 200) &&
+             request.resource.data.aliases is list &&
+             request.resource.data.sourceKey is string &&
+             request.resource.data.latestVersion is number &&
+             request.resource.data.latestFileName is string &&
+             request.resource.data.latestMimeType is string &&
+             request.resource.data.latestSummary is string &&
+             request.resource.data.linkedTaskIds is list &&
+             request.resource.data.linkedVisionIds is list &&
+             request.resource.data.linkedCycleGoalIds is list &&
+             request.resource.data.linkedFeedbackIds is list &&
+             request.resource.data.linkedSocialPostIds is list &&
+             (!('linkedCreativeItemIds' in request.resource.data) || request.resource.data.linkedCreativeItemIds is list) &&
+             (!('linkedLeadIds' in request.resource.data) || request.resource.data.linkedLeadIds is list) &&
+             (!('linkedAccountIds' in request.resource.data) || request.resource.data.linkedAccountIds is list) &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.lastUploadedAt is string &&
+             request.resource.data.authorId is string &&
+             request.resource.data.status in ['active', 'archived'] &&
+             (!('folderId' in request.resource.data) || request.resource.data.folderId == null || request.resource.data.folderId is string) &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidContextSourceVersion() {
+      return hasOnlyAllowedFields(['sourceId', 'sourceKey', 'version', 'fileName', 'mimeType', 'fileSize', 'contentHash', 'contentPreview', 'fullContent', 'contentStorage', 'routingContentAvailable', 'payload', 'linkedTaskIds', 'linkedVisionIds', 'linkedCycleGoalIds', 'linkedFeedbackIds', 'linkedSocialPostIds', 'linkedCreativeItemIds', 'linkedLeadIds', 'linkedAccountIds', 'createdAt', 'authorId', 'companyId', 'status']) &&
+             request.resource.data.sourceId is string &&
+             request.resource.data.sourceKey is string &&
+             request.resource.data.version is number &&
+             request.resource.data.fileName is string &&
+             request.resource.data.mimeType is string &&
+             request.resource.data.fileSize is number &&
+             request.resource.data.contentHash is string &&
+             request.resource.data.contentPreview is string &&
+             (!('fullContent' in request.resource.data) || request.resource.data.fullContent is string) &&
+             (!('contentStorage' in request.resource.data) || request.resource.data.contentStorage in ['full', 'preview-only']) &&
+             (!('routingContentAvailable' in request.resource.data) || request.resource.data.routingContentAvailable is bool) &&
+             request.resource.data.payload is map &&
+             request.resource.data.linkedTaskIds is list &&
+             request.resource.data.linkedVisionIds is list &&
+             request.resource.data.linkedCycleGoalIds is list &&
+             request.resource.data.linkedFeedbackIds is list &&
+             request.resource.data.linkedSocialPostIds is list &&
+             (!('linkedCreativeItemIds' in request.resource.data) || request.resource.data.linkedCreativeItemIds is list) &&
+             (!('linkedLeadIds' in request.resource.data) || request.resource.data.linkedLeadIds is list) &&
+             (!('linkedAccountIds' in request.resource.data) || request.resource.data.linkedAccountIds is list) &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             request.resource.data.status in ['processed', 'error'] &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidTeamChatChannel() {
+      return hasOnlyAllowedFields(['name', 'topic', 'status', 'participantIds', 'createdAt', 'updatedAt', 'authorId', 'companyId']) &&
+             validStringLength('name', 1, 120) &&
+             validStringLength('topic', 0, 500) &&
+             request.resource.data.status in ['active', 'archived'] &&
+             request.resource.data.participantIds is list &&
+             request.resource.data.participantIds.size() <= 200 &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidTeamChatParticipant() {
+      return hasOnlyAllowedFields(['displayName', 'participantType', 'linkedUserId', 'description', 'status', 'createdAt', 'updatedAt', 'authorId', 'companyId']) &&
+             validStringLength('displayName', 1, 120) &&
+             request.resource.data.participantType in ['team-member', 'ai-agent'] &&
+             (!('linkedUserId' in request.resource.data) || request.resource.data.linkedUserId == null || request.resource.data.linkedUserId is string) &&
+             validStringLength('description', 0, 500) &&
+             request.resource.data.status in ['active', 'inactive'] &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.updatedAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function isValidTeamChatMessage() {
+      return hasOnlyAllowedFields(['channelId', 'participantId', 'participantType', 'senderName', 'content', 'replyToMessageId', 'createdAt', 'authorId', 'companyId']) &&
+             request.resource.data.channelId is string &&
+             request.resource.data.participantId is string &&
+             request.resource.data.participantType in ['team-member', 'ai-agent'] &&
+             validStringLength('senderName', 1, 120) &&
+             validStringLength('content', 1, 8000) &&
+             (!('replyToMessageId' in request.resource.data) || request.resource.data.replyToMessageId == null || request.resource.data.replyToMessageId is string) &&
+             request.resource.data.createdAt is string &&
+             request.resource.data.authorId is string &&
+             (!('companyId' in request.resource.data) || request.resource.data.companyId == null || request.resource.data.companyId is string);
+    }
+
+    function canCreateTeamChatParticipant() {
+      return request.resource.data.participantType == 'ai-agent' ||
+             request.resource.data.linkedUserId == request.auth.uid ||
+             (
+               'companyId' in request.resource.data &&
+               request.resource.data.companyId != null &&
+               isCompanyAdmin(request.resource.data.companyId)
+             );
+    }
+
+    function canManageTeamChatParticipant() {
+      return resource.data.participantType == 'ai-agent' ||
+             (
+               resource.data.linkedUserId == request.auth.uid &&
+               request.resource.data.linkedUserId == request.auth.uid
+             ) ||
+             (
+               resource.data.companyId != null &&
+               isCompanyAdmin(resource.data.companyId)
+             );
+    }
+
+    function canDeleteTeamChatParticipant() {
+      return resource.data.participantType == 'ai-agent' ||
+             resource.data.linkedUserId == request.auth.uid ||
+             (
+               resource.data.companyId != null &&
+               isCompanyAdmin(resource.data.companyId)
+             );
+    }
+
+    function getTeamChatChannelData(channelId) {
+      return exists(/databases/$(database)/documents/teamChatChannels/$(channelId))
+        ? get(/databases/$(database)/documents/teamChatChannels/$(channelId)).data
+        : null;
+    }
+
+    function getTeamChatParticipantData(participantId) {
+      return exists(/databases/$(database)/documents/teamChatParticipants/$(participantId))
+        ? get(/databases/$(database)/documents/teamChatParticipants/$(participantId)).data
+        : null;
+    }
+
+    function getTeamChatMessageData(messageId) {
+      return exists(/databases/$(database)/documents/teamChatMessages/$(messageId))
+        ? get(/databases/$(database)/documents/teamChatMessages/$(messageId)).data
+        : null;
+    }
+
+    function isValidTeamChatReply(channelId, replyToMessageId) {
+      return replyToMessageId == null ||
+             (
+               getTeamChatMessageData(replyToMessageId) != null &&
+               getTeamChatMessageData(replyToMessageId).channelId == channelId
+             );
+    }
+
+    function canPostTeamChatMessage() {
+      let channel = getTeamChatChannelData(request.resource.data.channelId);
+      let participant = getTeamChatParticipantData(request.resource.data.participantId);
+      return channel != null &&
+             participant != null &&
+             channel.status == 'active' &&
+             participant.status == 'active' &&
+             participant.participantType == 'team-member' &&
+             participant.linkedUserId == request.auth.uid &&
+             channel.participantIds.hasAny([request.resource.data.participantId]) &&
+             request.resource.data.participantType == participant.participantType &&
+             request.resource.data.senderName == participant.displayName &&
+             request.resource.data.companyId == channel.companyId &&
+             request.resource.data.companyId == participant.companyId &&
+             isValidTeamChatReply(request.resource.data.channelId, request.resource.data.replyToMessageId);
+    }
+
+    function getInvitationData(inviteId) {
+      return inviteId is string &&
+             exists(/databases/$(database)/documents/invitations/$(inviteId))
+        ? get(/databases/$(database)/documents/invitations/$(inviteId)).data
+        : null;
+    }
+
+    function getCompanyData(companyId) {
+      return companyId is string &&
+             exists(/databases/$(database)/documents/companies/$(companyId))
+        ? get(/databases/$(database)/documents/companies/$(companyId)).data
+        : null;
+    }
+
+    function isInviteeForRecord(data) {
+      return isAuthenticated() &&
+             request.auth.token.email != null &&
+             'email' in data &&
+             data.email is string &&
+             request.auth.token.email.lower() == data.email.lower();
+    }
+
+    function isPendingInvitation(invite) {
+      return invite != null &&
+             (!('status' in invite) || invite.status == 'pending');
+    }
+
+    function isAcceptedInvitationProfileWrite() {
+      let invite = getInvitationData(('acceptedInvitationId' in request.resource.data) ? request.resource.data.acceptedInvitationId : null);
+      return isPendingInvitation(invite) &&
+             isInviteeForRecord(invite) &&
+             request.resource.data.email is string &&
+             request.resource.data.email.lower() == invite.email.lower() &&
+             request.resource.data.companyId == invite.companyId &&
+             request.resource.data.role == invite.role &&
+             request.resource.data.onboardingCompleted == true &&
+             request.resource.data.invitationAcceptedAt is string;
+    }
+
+    function isRejectedInvitationProfileWrite() {
+      let invite = getInvitationData(('rejectedInvitationId' in request.resource.data) ? request.resource.data.rejectedInvitationId : null);
+      return isPendingInvitation(invite) &&
+             isInviteeForRecord(invite) &&
+             request.resource.data.email is string &&
+             request.resource.data.email.lower() == invite.email.lower() &&
+             request.resource.data.invitationRejectedAt is string &&
+             (
+               !('companyId' in request.resource.data) ||
+               request.resource.data.companyId == null ||
+               request.resource.data.companyId == resource.data.companyId
+             );
+    }
+
+    function isOwnedCompanyProfileWrite() {
+      let company = getCompanyData(('companyId' in request.resource.data) ? request.resource.data.companyId : null);
+      return company != null &&
+             company.ownerId == request.auth.uid &&
+             request.resource.data.companyId == company.id;
+    }
+
+    function canOwnerCreateUserProfile() {
+      return isOwner(request.auth.uid) &&
+             request.resource.data.role in ['admin', 'member'] &&
+             (
+               isAcceptedInvitationProfileWrite() ||
+               isRejectedInvitationProfileWrite()
+             );
+    }
+
+    function canOwnerUpdateUserProfile() {
+      return isOwner(request.auth.uid) &&
+             (
+               (areImmutableFieldsUnchanged(['email', 'role', 'companyId'])) ||
+               isAcceptedInvitationProfileWrite() ||
+               isRejectedInvitationProfileWrite() ||
+               (isOwnedCompanyProfileWrite() && areImmutableFieldsUnchanged(['email', 'role']))
+             );
+    }
+
+    function isInviteeDecisionUpdate() {
+      return isInviteeForRecord(resource.data) &&
+             isPendingInvitation(resource.data) &&
+             request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt', 'respondedBy']) &&
+             request.resource.data.status in ['accepted', 'rejected'] &&
+             request.resource.data.respondedAt is string &&
+             request.resource.data.respondedBy == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId) || (isAuthenticated() && 'companyId' in resource.data && resource.data.companyId != null && isCompanyMember(resource.data.companyId));
+      allow create: if isOwner(userId) && canOwnerCreateUserProfile();
+      allow update: if canOwnerUpdateUserProfile() ||
+                       (isAuthenticated() && 'companyId' in resource.data && resource.data.companyId != null && isCompanyAdmin(resource.data.companyId) && areImmutableFieldsUnchanged(['email']));
+      allow delete: if false; // Don't allow deletion for now
+    }
+
+    match /companies/{companyId} {
+      allow read: if isCompanyMember(companyId);
+      allow create: if isAuthenticated() &&
+                       exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow update: if isCompanyAdmin(companyId);
+      allow delete: if false;
+    }
+
+    match /invitations/{inviteId} {
+      allow read: if isAuthenticated() && (
+        ('companyId' in resource.data && isCompanyMember(resource.data.companyId)) ||
+        ('email' in resource.data && request.auth.token.email != null && request.auth.token.email.lower() == resource.data.email)
+      );
+      allow create: if isAuthenticated() && 'companyId' in request.resource.data && isCompanyAdmin(request.resource.data.companyId);
+      allow update: if isAuthenticated() && (
+        ('companyId' in resource.data && isCompanyAdmin(resource.data.companyId)) ||
+        isInviteeDecisionUpdate()
+      );
+      allow delete: if isAuthenticated() && 'companyId' in resource.data && isCompanyAdmin(resource.data.companyId);
+    }
+
+    match /chatChannels/{docId} {
+      allow read: if canAccessDoc();
+      allow create: if canCreateDoc() &&
+        request.resource.data.name is string &&
+        request.resource.data.description is string &&
+        request.resource.data.createdAt is string &&
+        request.resource.data.updatedAt is string;
+      allow update: if canAccessDoc() &&
+        uidNotModified() &&
+        companyIdNotModified() &&
+        areImmutableFieldsUnchanged(['createdAt', 'authorId']);
+      allow delete: if isAuthenticated() && (
+        resource.data.authorId == request.auth.uid ||
+        ('companyId' in resource.data && resource.data.companyId != null && isCompanyAdmin(resource.data.companyId))
+      );
+    }
+
+    match /chatMessages/{docId} {
+      allow read: if canAccessDoc();
+      allow create: if canCreateDoc() &&
+        request.resource.data.channelId is string &&
+        request.resource.data.channelName is string &&
+        request.resource.data.content is string &&
+        request.resource.data.authorName is string &&
+        request.resource.data.createdAt is string;
+      allow update: if false;
+      allow delete: if isAuthenticated() && (
+        resource.data.authorId == request.auth.uid ||
+        ('companyId' in resource.data && resource.data.companyId != null && isCompanyAdmin(resource.data.companyId))
+      );
+    }
+
+    match /chatReadStates/{docId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.authorId == request.auth.uid &&
+        request.resource.data.channelId is string &&
+        request.resource.data.lastReadAt is string &&
+        (!('companyId' in request.resource.data) ||
+          request.resource.data.companyId == null ||
+          isCompanyMember(request.resource.data.companyId));
+      allow update: if isAuthenticated() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.authorId == request.auth.uid &&
+        companyIdNotModified() &&
+        areImmutableFieldsUnchanged(['channelId', 'userId', 'authorId']);
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    match /notificationReadStates/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) &&
+        request.resource.data.userId == userId &&
+        request.resource.data.authorId == userId &&
+        request.resource.data.lastReadAt is string;
+      allow update: if isOwner(userId) &&
+        request.resource.data.userId == userId &&
+        request.resource.data.authorId == userId &&
+        request.resource.data.lastReadAt is string &&
+        areImmutableFieldsUnchanged(['userId', 'authorId']);
+      allow delete: if false;
+    }
+
+    match /tasks/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /bugs/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidBug(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']) && isValidBug(); }
+    match /roadmapItems/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidRoadmapItem(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']) && isValidRoadmapItem(); }
+    match /prompts/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /visions/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /cycleGoals/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidCycleGoal(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /weekMarkers/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidWeekMarker(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'weekNumber']); }
+    match /apiEndpoints/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /environments/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /socialPosts/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidSocialPost(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /creativeItems/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidCreativeItem() && canCreateCreativeItem(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']) && isValidCreativeItem() && (isCreativeAdminForExisting() || canMemberUpdateCreativeItem()); }
+    match /creativeAssets/{docId} { allow read: if canAccessDoc(); allow create, delete: if false; allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'fileName', 'mimeType', 'fileSize', 'storagePath', 'provider', 'cloudinaryAssetId', 'cloudinaryResourceType', 'cloudinaryDeliveryType', 'cloudinaryVersion', 'cloudinaryFormat', 'status', 'uploadedAt']) && (!('creativeId' in request.resource.data) || request.resource.data.creativeId == null || canAccessCreativeItem(request.resource.data.creativeId)) && isValidCreativeAsset(); }
+    match /feedbacks/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidFeedback(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /accounts/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidAccount(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']) && isValidAccount(); }
+    match /leads/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidLead(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']) && isValidLead(); }
+    match /contextSources/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidContextSource(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /contextSourceFolders/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /contextSourceVersions/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidContextSourceVersion(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /seoKeywords/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /timeBlocks/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /teamChatChannels/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc() && isValidTeamChatChannel(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']) && isValidTeamChatChannel(); }
+    match /teamChatParticipants/{docId} { allow read: if canAccessDoc(); allow delete: if canAccessDoc() && canDeleteTeamChatParticipant(); allow create: if canCreateDoc() && isValidTeamChatParticipant() && canCreateTeamChatParticipant(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'participantType']) && isValidTeamChatParticipant() && canManageTeamChatParticipant(); }
+    match /teamChatMessages/{docId} { allow read: if canAccessDoc(); allow create: if canCreateDoc() && isValidTeamChatMessage() && canPostTeamChatMessage(); allow update, delete: if false; }
+    match /blogArticles/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /operatorDesks/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'slug']); }
+    match /operatorWorkOrders/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'operatorDeskId']); }
+    match /operatorContextPacks/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /operatorMemories/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId']); }
+    match /operatorCheckins/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if false; }
+    match /operatorOutputs/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'operatorDeskId', 'workOrderId', 'externalAgentName', 'outputType']); }
+    match /operatorInjections/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'outputId', 'targetHub', 'action']); }
+    match /operatorApprovals/{docId} { allow read, delete: if canAccessDoc(); allow create: if canCreateDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified() && areImmutableFieldsUnchanged(['createdAt', 'authorId', 'operatorDeskId', 'workOrderId', 'outputId', 'targetHub', 'action', 'riskLevel']); }
+    match /operatorMcpRegistry/{docId} { allow read: if isAuthenticated(); allow create, update, delete: if false; }
+    match /osOperators/{docId} { allow read: if canAccessDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified(); allow create, delete: if false; }
+    match /agenticTasks/{docId} { allow read: if canAccessDoc(); allow update: if canAccessDoc() && uidNotModified() && companyIdNotModified(); allow create, delete: if false; }
+    match /businessPlans/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidBusinessPlan() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidBusinessPlan() && canUpdateBusinessPlan() && validBusinessPlanImmutableFields();
+      allow delete: if canUpdateBusinessPlan();
+    }
+    match /businessPlans/{docId}/editingSessions/{sessionId} {
+      allow read: if canAccessBusinessPlan(docId);
+      allow create: if canAccessBusinessPlan(docId) && sessionId == request.resource.data.sessionId && isValidBusinessPlanEditingSession(docId);
+      allow update: if canAccessBusinessPlan(docId) && sessionId == resource.data.sessionId && sessionId == request.resource.data.sessionId && isValidBusinessPlanEditingSession(docId) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if canAccessBusinessPlan(docId) && resource.data.userId == request.auth.uid;
+    }
+    match /apiKeys/{docId} { allow read, write: if false; }
+  }
+}
