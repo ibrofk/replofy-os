@@ -1,19 +1,29 @@
 import { spawn } from 'node:child_process';
 
+export function postgresDatabaseName(databaseUrl) {
+  const parsed = new URL(databaseUrl);
+  if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+    throw new Error('DATABASE_URL must use the postgres:// or postgresql:// scheme.');
+  }
+  const databaseName = decodeURIComponent(parsed.pathname.slice(1));
+  if (!parsed.hostname || !databaseName) {
+    throw new Error('DATABASE_URL must include a hostname and database name.');
+  }
+  return databaseName;
+}
+
 export function postgresEnvironment(databaseUrl, baseEnvironment = process.env) {
   const parsed = new URL(databaseUrl);
   if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
     throw new Error('DATABASE_URL must use the postgres:// or postgresql:// scheme.');
   }
-  if (!parsed.hostname || !parsed.pathname.slice(1)) {
-    throw new Error('DATABASE_URL must include a hostname and database name.');
-  }
+  const databaseName = postgresDatabaseName(databaseUrl);
 
   const environment = { ...baseEnvironment };
   delete environment.DATABASE_URL;
   environment.PGHOST = parsed.hostname;
   environment.PGPORT = parsed.port || '5432';
-  environment.PGDATABASE = decodeURIComponent(parsed.pathname.slice(1));
+  environment.PGDATABASE = databaseName;
   if (parsed.username) environment.PGUSER = decodeURIComponent(parsed.username);
   if (parsed.password) environment.PGPASSWORD = decodeURIComponent(parsed.password);
   const sslMode = parsed.searchParams.get('sslmode');

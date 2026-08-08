@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { createHash } from 'node:crypto';
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { postgresEnvironment, runPostgresCommand } from './lib/postgres-cli.mjs';
+import { postgresDatabaseName, postgresEnvironment, runPostgresCommand } from './lib/postgres-cli.mjs';
 
 if (process.argv.includes('--help')) {
   console.log(
@@ -42,6 +42,8 @@ try {
 await runPostgresCommand(
   'pg_restore',
   [
+    '--dbname',
+    postgresDatabaseName(databaseUrl),
     '--clean',
     '--if-exists',
     '--no-owner',

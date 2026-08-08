@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { cp, lstat, mkdir, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { postgresEnvironment, runPostgresCommand } from './lib/postgres-cli.mjs';
+import { postgresDatabaseName, postgresEnvironment, runPostgresCommand } from './lib/postgres-cli.mjs';
 import { createS3Client, s3OptionsFromEnvironment } from './lib/s3-client.mjs';
 
 const BUNDLE_VERSION = 1;
@@ -126,7 +126,7 @@ try {
 
   await runPostgresCommand(
     'pg_restore',
-    ['--clean', '--if-exists', '--no-owner', '--no-privileges', '--exit-on-error', '--single-transaction', dumpPath],
+    ['--dbname', postgresDatabaseName(databaseUrl), '--clean', '--if-exists', '--no-owner', '--no-privileges', '--exit-on-error', '--single-transaction', dumpPath],
     postgresEnvironment(databaseUrl),
   );
 

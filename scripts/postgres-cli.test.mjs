@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { postgresEnvironment } from './lib/postgres-cli.mjs';
+import { postgresDatabaseName, postgresEnvironment } from './lib/postgres-cli.mjs';
+
+test('postgresDatabaseName extracts the decoded target database', () => {
+  assert.equal(postgresDatabaseName('postgresql://replofy:p%40ss@db.example.test/replofy%5Fos'), 'replofy_os');
+});
 
 test('postgresEnvironment extracts connection fields without retaining DATABASE_URL', () => {
   const environment = postgresEnvironment(
