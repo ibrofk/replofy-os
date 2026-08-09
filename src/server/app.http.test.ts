@@ -124,6 +124,16 @@ test('standalone HTTP routes enforce session/workspace boundaries and expose the
   assert.ok(api.resources?.includes('tasks'));
   assert.deepEqual(api.capabilities?.authentication, ['session', 'api-key']);
 
+  response = await fetch(`${baseUrl}/api/v1/api-keys`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': 'rpo_ai_must_not_create_keys' },
+    body: JSON.stringify({ label: 'should-not-exist' }),
+  });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    error: 'API key management is available only from the authenticated settings UI.',
+  });
+
   currentSession = {
     ...currentSession,
     session: { ...currentSession.session, activeWorkspaceId: blockedWorkspaceId },

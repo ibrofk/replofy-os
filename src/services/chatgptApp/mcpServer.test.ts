@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { ApiKeyServerError } from '../apiKeyServer.js';
+import { handleExternalApiRequest } from '../externalApiServer.js';
 import { handleReplofyMcpRequest } from './mcpServer.js';
 
 type CapturedResponse = {
@@ -83,5 +85,20 @@ test('hosted MCP tools/list exposes the connector contract without making an API
   } finally {
     if (previousAuthMode === undefined) delete process.env.REPLOFY_CHATGPT_APP_AUTH_MODE;
     else process.env.REPLOFY_CHATGPT_APP_AUTH_MODE = previousAuthMode;
+  }
+});
+
+test('hosted MCP rejects every API-key management path before routing', async () => {
+  for (const [method, path] of [
+    ['POST', '/api/v1/api-keys'],
+    ['GET', '/api/v1/api-keys'],
+    ['DELETE', '/api/v1/api-keys/key-1'],
+  ] as const) {
+    await assert.rejects(
+      () => handleExternalApiRequest({}, method, path, { label: 'not allowed' }),
+      (error: unknown) => error instanceof ApiKeyServerError
+        && error.statusCode === 403
+        && error.message === 'API key management is prohibited through MCP.',
+    );
   }
 });

@@ -236,6 +236,26 @@ export async function updateEnvironment(database: PostgresDatabase, actor: Works
   }
 }
 
+export async function deleteEnvironment(database: PostgresDatabase, actor: WorkspaceActor, environmentId: string) {
+  const id = parse(environmentIdSchema, environmentId, 'Environment id is invalid.');
+  return database.transaction(async (transaction) => {
+    const existing = await transaction.select({ id: environment.id }).from(environment).where(and(
+      eq(environment.workspaceId, actor.workspaceId),
+      eq(environment.id, id),
+    )).limit(1);
+    if (!existing[0]) throw new SystemsError('Environment not found.', 404);
+    const deployments = await transaction.delete(environmentDeployment).where(and(
+      eq(environmentDeployment.workspaceId, actor.workspaceId),
+      eq(environmentDeployment.environmentId, id),
+    )).returning({ id: environmentDeployment.id });
+    await transaction.delete(environment).where(and(
+      eq(environment.workspaceId, actor.workspaceId),
+      eq(environment.id, id),
+    ));
+    return { id, deleted: true as const, deletedDeployments: deployments.length };
+  });
+}
+
 async function getEnvironmentForUpdate(transaction: Parameters<Parameters<PostgresDatabase['transaction']>[0]>[0], actor: WorkspaceActor, environmentId: string) {
   const id = parse(environmentIdSchema, environmentId, 'Environment id is invalid.');
   const rows = await transaction.select().from(environment).where(and(

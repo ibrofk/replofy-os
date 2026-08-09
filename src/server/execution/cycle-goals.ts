@@ -4,6 +4,7 @@ import type { WorkspaceRepository as PostgresDatabase } from '../platform/worksp
 import { postgresErrorCode } from '../db/errors.js';
 import { cycleGoal, task } from '../db/schema.js';
 import type { WorkspaceActor } from './tasks.js';
+import { pickProvided } from '../validation.js';
 
 const goalStatusSchema = z.enum(['active', 'completed', 'archived']);
 
@@ -112,9 +113,10 @@ export async function updateCycleGoal(
 ) {
   const parsedGoalId = parseOrThrow(z.string().uuid().safeParse(goalId));
   const parsed = parseOrThrow(updateGoalSchema.safeParse(input));
+  const patch = pickProvided(input, parsed);
   const rows = await database
     .update(cycleGoal)
-    .set({ ...parsed, updatedAt: new Date() })
+    .set({ ...patch, updatedAt: new Date() })
     .where(
       and(eq(cycleGoal.id, parsedGoalId), eq(cycleGoal.workspaceId, actor.workspaceId)),
     )

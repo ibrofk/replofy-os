@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { blogArticle, workspaceMembership } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
+import { pickProvided } from './validation.js';
 
 const articleStatuses = [
   'idea',
@@ -32,7 +34,7 @@ const briefSchema = z.object({
   contentCluster: z.string().max(500).default(''),
 });
 const evidenceSchema = z.object({
-  id: z.string().trim().min(1).max(200),
+  id: z.string().trim().min(1).max(200).default(() => randomUUID()),
   claim: z.string().trim().min(1).max(4_000),
   value: z.string().max(4_000).optional(),
   sourceId: z.string().max(200).optional(),
@@ -254,38 +256,39 @@ export async function updateBlogArticle(
 ) {
   const id = parse(z.string().uuid(), articleId);
   const data = parse(articleUpdateSchema, input);
-  if (data.ownerId !== undefined) await assertOwner(database, actor, data.ownerId);
+  const patch = pickProvided(input, data);
+  if (patch.ownerId !== undefined) await assertOwner(database, actor, patch.ownerId);
   const datePatch = {
-    ...(data.targetPublishAt !== undefined && { targetPublishAt: toDate(data.targetPublishAt) }),
-    ...(data.scheduledFor !== undefined && { scheduledFor: toDate(data.scheduledFor) }),
-    ...(data.validatedAt !== undefined && { validatedAt: toDate(data.validatedAt) }),
-    ...(data.publishedAt !== undefined && { publishedAt: toDate(data.publishedAt) }),
-    ...(data.rejectedAt !== undefined && { rejectedAt: toDate(data.rejectedAt) }),
+    ...(patch.targetPublishAt !== undefined && { targetPublishAt: toDate(patch.targetPublishAt) }),
+    ...(patch.scheduledFor !== undefined && { scheduledFor: toDate(patch.scheduledFor) }),
+    ...(patch.validatedAt !== undefined && { validatedAt: toDate(patch.validatedAt) }),
+    ...(patch.publishedAt !== undefined && { publishedAt: toDate(patch.publishedAt) }),
+    ...(patch.rejectedAt !== undefined && { rejectedAt: toDate(patch.rejectedAt) }),
   };
   try {
     const rows = await database
       .update(blogArticle)
       .set({
-        ...(data.title !== undefined && { title: data.title }),
-        ...(data.slug !== undefined && { slug: data.slug }),
-        ...(data.summary !== undefined && { summary: data.summary }),
-        ...(data.content !== undefined && { content: data.content }),
-        ...(data.status !== undefined && {
-          status: data.status,
-          ...(data.status === 'published' && data.publishedAt === undefined && { publishedAt: new Date() }),
-          ...(data.status === 'rejected' && data.rejectedAt === undefined && { rejectedAt: new Date() }),
+        ...(patch.title !== undefined && { title: patch.title }),
+        ...(patch.slug !== undefined && { slug: patch.slug }),
+        ...(patch.summary !== undefined && { summary: patch.summary }),
+        ...(patch.content !== undefined && { content: patch.content }),
+        ...(patch.status !== undefined && {
+          status: patch.status,
+          ...(patch.status === 'published' && patch.publishedAt === undefined && { publishedAt: new Date() }),
+          ...(patch.status === 'rejected' && patch.rejectedAt === undefined && { rejectedAt: new Date() }),
         }),
-        ...(data.roadmapPhase !== undefined && { roadmapPhase: data.roadmapPhase }),
-        ...(data.priority !== undefined && { priority: data.priority }),
-        ...(data.ownerId !== undefined && { ownerUserId: data.ownerId }),
-        ...(data.brief !== undefined && { brief: briefSchema.parse(data.brief) }),
-        ...(data.evidence !== undefined && { evidence: data.evidence }),
-        ...(data.linkedSourceIds !== undefined && { linkedSourceIds: [...new Set(data.linkedSourceIds)] }),
-        ...(data.distribution !== undefined && { distribution: distributionSchema.parse(data.distribution) }),
-        ...(data.tags !== undefined && { tags: [...new Set(data.tags)] }),
-        ...(data.dataPoints !== undefined && { dataPoints: data.dataPoints }),
-        ...(data.docLinks !== undefined && { docLinks: [...new Set(data.docLinks)] }),
-        ...(data.validationNotes !== undefined && { validationNotes: data.validationNotes }),
+        ...(patch.roadmapPhase !== undefined && { roadmapPhase: patch.roadmapPhase }),
+        ...(patch.priority !== undefined && { priority: patch.priority }),
+        ...(patch.ownerId !== undefined && { ownerUserId: patch.ownerId }),
+        ...(patch.brief !== undefined && { brief: briefSchema.parse(patch.brief) }),
+        ...(patch.evidence !== undefined && { evidence: patch.evidence }),
+        ...(patch.linkedSourceIds !== undefined && { linkedSourceIds: [...new Set(patch.linkedSourceIds)] }),
+        ...(patch.distribution !== undefined && { distribution: distributionSchema.parse(patch.distribution) }),
+        ...(patch.tags !== undefined && { tags: [...new Set(patch.tags)] }),
+        ...(patch.dataPoints !== undefined && { dataPoints: patch.dataPoints }),
+        ...(patch.docLinks !== undefined && { docLinks: [...new Set(patch.docLinks)] }),
+        ...(patch.validationNotes !== undefined && { validationNotes: patch.validationNotes }),
         ...datePatch,
         updatedAt: new Date(),
       })

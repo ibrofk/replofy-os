@@ -142,6 +142,11 @@ class ReplofyOsMcpSmokeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(describe_result.data["resource"], "tasks")
         self.assertIn("filters", describe_result.data["guide"])
 
+    async def test_standalone_default_origin_matches_the_api_port(self) -> None:
+        os.environ.pop("REPLOFY_OS_BASE_URL", None)
+        config = json.loads((await server.replofy_config.fn()))
+        self.assertEqual(config["baseUrl"], "http://localhost:4100")
+
     def test_compact_blog_article_normalizes_legacy_status(self) -> None:
         compact = server._compact_blog_article({
             "id": "blog-1",
@@ -185,6 +190,74 @@ class ReplofyOsMcpSmokeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server._normalize_resource_name("operator-injections"), "operator-injections")
         self.assertEqual(server._normalize_resource_name("business-plans"), "business-plans")
         self.assertEqual(server._normalize_resource_name("weekMarkers"), "week-markers")
+
+    def test_resource_capabilities_and_paths_are_explicit(self) -> None:
+        self.assertEqual(server._normalize_resource_name("users"), "members")
+        self.assertEqual(server._resource_collection_path("work-orders"), "/api/v1/operator-work-orders")
+        self.assertEqual(
+            server._resource_collection_path(
+                "context-source-versions",
+                {"sourceId": "source/one"},
+            ),
+            "/api/v1/context-sources/source%2Fone/versions",
+        )
+        self.assertEqual(
+            server._resource_record_path("work-orders", "order/one"),
+            "/api/v1/operator-work-orders/order%2Fone",
+        )
+        with self.assertRaisesRegex(RuntimeError, "does not support 'create'"):
+            server._assert_operation("mcp-registry", "create")
+
+    def test_mcp_cannot_manage_api_keys(self) -> None:
+        for method, path in (
+            ("POST", "/api/v1/api-keys"),
+            ("GET", "/api/v1/api-keys/"),
+            ("DELETE", "/api/api-keys/one"),
+            ("PATCH", "/api/v1/%61pi-keys"),
+        ):
+            with self.subTest(method=method, path=path):
+                with self.assertRaisesRegex(RuntimeError, "API key management is prohibited through MCP"):
+                    server._assert_mcp_request_allowed(method, path)
+
+        self.assertEqual(
+            server._assert_mcp_request_allowed("GET", "tasks"),
+            "/api/v1/tasks",
+        )
+
+    def test_filters_support_json_and_reject_silent_malformed_values(self) -> None:
+        self.assertEqual(
+            server._normalize_filters('{"status":"done","assigneeId":"user-1"}'),
+            {"status": "done", "assigneeId": "user-1"},
+        )
+        self.assertEqual(
+            server._normalize_filters("status=done&status=icebox"),
+            {"status": ["done", "icebox"]},
+        )
+        with self.assertRaisesRegex(RuntimeError, "filters must be a dictionary"):
+            server._normalize_filters("status")
+
+    async def test_set_task_status_uses_the_internal_callable(self) -> None:
+        captured: dict[str, object] = {}
+
+        async def fake_update(_context: object, resource: str, record_id: str, payload: dict[str, object]) -> dict[str, object]:
+            captured.update({"resource": resource, "record_id": record_id, "payload": payload})
+            return {"data": {"id": record_id, **payload}}
+
+        async def fake_route(_context: object, _resource: str, result: dict[str, object], *, record_id: str | None = None) -> dict[str, object]:
+            return {"routed": True, "recordId": record_id, "data": result["data"]}
+
+        original_update = server._update_record_with_fallback
+        original_route = server._route_write_result
+        server._update_record_with_fallback = fake_update
+        server._route_write_result = fake_route
+        try:
+            result = await server.set_task_status.fn("task-1", "done", object())
+        finally:
+            server._update_record_with_fallback = original_update
+            server._route_write_result = original_route
+
+        self.assertEqual(captured, {"resource": "tasks", "record_id": "task-1", "payload": {"status": "done"}})
+        self.assertEqual(result["data"]["status"], "done")
 
     async def test_context_excerpt_fallback_keeps_standalone_writes_usable(self) -> None:
         payload = {"id": "article-1", "title": "Portable by default"}

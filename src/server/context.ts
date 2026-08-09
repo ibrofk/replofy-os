@@ -356,6 +356,16 @@ export async function updateContextSource(database: PostgresDatabase, actor: Wor
   return serializeSource(rows[0]);
 }
 
+export async function deleteContextSource(database: PostgresDatabase, actor: WorkspaceActor, sourceId: string) {
+  const id = parse(z.string().uuid(), sourceId, 'Context source id is invalid.');
+  const rows = await database.delete(contextSource).where(and(
+    eq(contextSource.workspaceId, actor.workspaceId),
+    eq(contextSource.id, id),
+  )).returning({ id: contextSource.id });
+  if (!rows[0]) throw new ContextError('Context source not found.', 404);
+  return { id: rows[0].id, deleted: true as const, cascadedVersionsAndItems: true };
+}
+
 export async function listContextSourceVersions(database: PostgresDatabase, actor: WorkspaceActor, sourceId: string) {
   const id = parse(z.string().uuid(), sourceId, 'Context source id is invalid.');
   const rows = await database.select().from(contextSourceVersion).where(and(
@@ -364,11 +374,33 @@ export async function listContextSourceVersions(database: PostgresDatabase, acto
   return rows.map(serializeVersion);
 }
 
+export async function listAllContextSourceVersions(database: PostgresDatabase, actor: WorkspaceActor, query: Record<string, unknown> = {}) {
+  const sourceId = z.string().uuid().optional().safeParse(query.sourceId);
+  const status = z.enum(['processed', 'error']).optional().safeParse(query.status);
+  if (!sourceId.success || !status.success) throw new ContextError('Context source version filters are invalid.', 400);
+  const rows = await database.select().from(contextSourceVersion).where(and(
+    eq(contextSourceVersion.workspaceId, actor.workspaceId),
+    sourceId.data ? eq(contextSourceVersion.sourceId, sourceId.data) : undefined,
+    status.data ? eq(contextSourceVersion.status, status.data) : undefined,
+  )).orderBy(desc(contextSourceVersion.createdAt)).limit(300);
+  return rows.map(serializeVersion);
+}
+
 export async function getContextSourceVersion(database: PostgresDatabase, actor: WorkspaceActor, versionId: string) {
   const id = parse(z.string().uuid(), versionId, 'Context source version id is invalid.');
   const rows = await database.select().from(contextSourceVersion).where(and(eq(contextSourceVersion.workspaceId, actor.workspaceId), eq(contextSourceVersion.id, id))).limit(1);
   if (!rows[0]) throw new ContextError('Context source version not found.', 404);
   return serializeVersion(rows[0]);
+}
+
+export async function deleteContextSourceVersion(database: PostgresDatabase, actor: WorkspaceActor, versionId: string) {
+  const id = parse(z.string().uuid(), versionId, 'Context source version id is invalid.');
+  const rows = await database.delete(contextSourceVersion).where(and(
+    eq(contextSourceVersion.workspaceId, actor.workspaceId),
+    eq(contextSourceVersion.id, id),
+  )).returning({ id: contextSourceVersion.id });
+  if (!rows[0]) throw new ContextError('Context source version not found.', 404);
+  return { id: rows[0].id, deleted: true as const, cascadedItems: true };
 }
 
 export async function listContextSourceItems(database: PostgresDatabase, actor: WorkspaceActor, query: Record<string, unknown> = {}) {
@@ -381,6 +413,16 @@ export async function listContextSourceItems(database: PostgresDatabase, actor: 
   return rows.map(serializeItem);
 }
 
+export async function getContextSourceItem(database: PostgresDatabase, actor: WorkspaceActor, itemId: string) {
+  const id = parse(z.string().uuid(), itemId, 'Context item id is invalid.');
+  const rows = await database.select().from(contextSourceItem).where(and(
+    eq(contextSourceItem.workspaceId, actor.workspaceId),
+    eq(contextSourceItem.id, id),
+  )).limit(1);
+  if (!rows[0]) throw new ContextError('Context source item not found.', 404);
+  return serializeItem(rows[0]);
+}
+
 export async function updateContextSourceItem(database: PostgresDatabase, actor: WorkspaceActor, itemId: string, input: unknown) {
   const id = parse(z.string().uuid(), itemId, 'Context item id is invalid.');
   const data = parse(itemUpdateSchema, input, 'Context item update is invalid.');
@@ -389,6 +431,16 @@ export async function updateContextSourceItem(database: PostgresDatabase, actor:
   )).returning();
   if (!rows[0]) throw new ContextError('Context item not found.', 404);
   return serializeItem(rows[0]);
+}
+
+export async function deleteContextSourceItem(database: PostgresDatabase, actor: WorkspaceActor, itemId: string) {
+  const id = parse(z.string().uuid(), itemId, 'Context item id is invalid.');
+  const rows = await database.delete(contextSourceItem).where(and(
+    eq(contextSourceItem.workspaceId, actor.workspaceId),
+    eq(contextSourceItem.id, id),
+  )).returning({ id: contextSourceItem.id });
+  if (!rows[0]) throw new ContextError('Context source item not found.', 404);
+  return { id: rows[0].id, deleted: true as const };
 }
 
 export async function listContextSourceFolders(database: PostgresDatabase, actor: WorkspaceActor) {
@@ -405,4 +457,50 @@ export async function createContextSourceFolder(database: PostgresDatabase, acto
     if (postgresErrorCode(error) === '23505') throw new ContextError('A folder with this name already exists.', 409);
     throw error;
   }
+}
+
+export async function getContextSourceFolder(database: PostgresDatabase, actor: WorkspaceActor, folderId: string) {
+  const id = parse(z.string().uuid(), folderId, 'Context folder id is invalid.');
+  const rows = await database.select().from(contextSourceFolder).where(and(
+    eq(contextSourceFolder.workspaceId, actor.workspaceId),
+    eq(contextSourceFolder.id, id),
+  )).limit(1);
+  if (!rows[0]) throw new ContextError('Context source folder not found.', 404);
+  return serializeFolder(rows[0]);
+}
+
+export async function updateContextSourceFolder(database: PostgresDatabase, actor: WorkspaceActor, folderId: string, input: unknown) {
+  const id = parse(z.string().uuid(), folderId, 'Context folder id is invalid.');
+  const data = parse(folderSchema, input, 'Context source folder is invalid.');
+  try {
+    const rows = await database.update(contextSourceFolder).set({ name: data.name, updatedAt: new Date() }).where(and(
+      eq(contextSourceFolder.workspaceId, actor.workspaceId),
+      eq(contextSourceFolder.id, id),
+    )).returning();
+    if (!rows[0]) throw new ContextError('Context source folder not found.', 404);
+    return serializeFolder(rows[0]);
+  } catch (error) {
+    if (postgresErrorCode(error) === '23505') throw new ContextError('A folder with this name already exists.', 409);
+    throw error;
+  }
+}
+
+export async function deleteContextSourceFolder(database: PostgresDatabase, actor: WorkspaceActor, folderId: string) {
+  const id = parse(z.string().uuid(), folderId, 'Context folder id is invalid.');
+  return database.transaction(async (transaction) => {
+    const rows = await transaction.select({ id: contextSourceFolder.id }).from(contextSourceFolder).where(and(
+      eq(contextSourceFolder.workspaceId, actor.workspaceId),
+      eq(contextSourceFolder.id, id),
+    )).limit(1);
+    if (!rows[0]) throw new ContextError('Context source folder not found.', 404);
+    await transaction.update(contextSource).set({ folderId: null, updatedAt: new Date() }).where(and(
+      eq(contextSource.workspaceId, actor.workspaceId),
+      eq(contextSource.folderId, id),
+    ));
+    await transaction.delete(contextSourceFolder).where(and(
+      eq(contextSourceFolder.workspaceId, actor.workspaceId),
+      eq(contextSourceFolder.id, id),
+    ));
+    return { id, deleted: true as const, detachedSources: true };
+  });
 }

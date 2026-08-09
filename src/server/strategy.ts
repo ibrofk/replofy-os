@@ -14,6 +14,7 @@ import {
   weekMarker,
 } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
+import { pickProvided } from './validation.js';
 
 const promptVersions = z.string().trim().min(1).max(40);
 const sourceLineage = z.record(z.string(), z.unknown()).default({});
@@ -99,6 +100,12 @@ function id(value: string) {
 
 function asDate(value: string | null | undefined) {
   return value ? new Date(value) : null;
+}
+
+function validateWeekWindow(startedAt: string, endedAt: string | null | undefined) {
+  if (endedAt && new Date(endedAt).getTime() < new Date(startedAt).getTime()) {
+    throw new StrategyError('endedAt must be at or after startedAt.', 400);
+  }
 }
 
 function serializePrompt(row: typeof prompt.$inferSelect) {
@@ -219,7 +226,8 @@ export async function createPrompt(database: PostgresDatabase, actor: WorkspaceA
 
 export async function updatePrompt(database: PostgresDatabase, actor: WorkspaceActor, promptId: string, input: unknown) {
   const data = parse(promptUpdateSchema, input);
-  const rows = await database.update(prompt).set({ ...data, updatedAt: new Date() }).where(and(
+  const patch = pickProvided(input, data);
+  const rows = await database.update(prompt).set({ ...patch, updatedAt: new Date() }).where(and(
     eq(prompt.workspaceId, actor.workspaceId), eq(prompt.id, id(promptId)),
   )).returning();
   if (!rows[0]) throw new StrategyError('Prompt not found.', 404);
@@ -269,12 +277,13 @@ export async function createSocialPost(database: PostgresDatabase, actor: Worksp
 
 export async function updateSocialPost(database: PostgresDatabase, actor: WorkspaceActor, postId: string, input: unknown) {
   const data = parse(socialPostUpdateSchema, input);
+  const patch = pickProvided(input, data);
   const rows = await database.update(socialPost).set({
-    ...(data.platform !== undefined && { platform: data.platform }),
-    ...(data.content !== undefined && { content: data.content }),
-    ...(data.scheduledFor !== undefined && { scheduledFor: new Date(data.scheduledFor) }),
-    ...(data.status !== undefined && { status: data.status }),
-    ...(data.sourceLineage !== undefined && { sourceLineage: data.sourceLineage }),
+    ...(patch.platform !== undefined && { platform: patch.platform }),
+    ...(patch.content !== undefined && { content: patch.content }),
+    ...(patch.scheduledFor !== undefined && { scheduledFor: new Date(patch.scheduledFor) }),
+    ...(patch.status !== undefined && { status: patch.status }),
+    ...(patch.sourceLineage !== undefined && { sourceLineage: patch.sourceLineage }),
     updatedAt: new Date(),
   }).where(and(eq(socialPost.workspaceId, actor.workspaceId), eq(socialPost.id, id(postId)))).returning();
   if (!rows[0]) throw new StrategyError('Social post not found.', 404);
@@ -323,11 +332,12 @@ export async function createSeoKeyword(database: PostgresDatabase, actor: Worksp
 
 export async function updateSeoKeyword(database: PostgresDatabase, actor: WorkspaceActor, keywordId: string, input: unknown) {
   const data = parse(seoKeywordUpdateSchema, input);
-  if (data.cycleGoalId !== undefined) await assertCycleGoal(database, actor, data.cycleGoalId);
+  const patch = pickProvided(input, data);
+  if (patch.cycleGoalId !== undefined) await assertCycleGoal(database, actor, patch.cycleGoalId);
   const rows = await database.update(seoKeyword).set({
-    ...(data.keyword !== undefined && { keyword: data.keyword }),
-    ...(data.intent !== undefined && { intent: data.intent }),
-    ...(data.cycleGoalId !== undefined && { cycleGoalId: data.cycleGoalId ?? null }),
+    ...(patch.keyword !== undefined && { keyword: patch.keyword }),
+    ...(patch.intent !== undefined && { intent: patch.intent }),
+    ...(patch.cycleGoalId !== undefined && { cycleGoalId: patch.cycleGoalId ?? null }),
     updatedAt: new Date(),
   }).where(and(eq(seoKeyword.workspaceId, actor.workspaceId), eq(seoKeyword.id, id(keywordId)))).returning();
   if (!rows[0]) throw new StrategyError('SEO keyword not found.', 404);
@@ -373,7 +383,8 @@ export async function createFeedback(database: PostgresDatabase, actor: Workspac
 
 export async function updateFeedback(database: PostgresDatabase, actor: WorkspaceActor, feedbackId: string, input: unknown) {
   const data = parse(feedbackUpdateSchema, input);
-  const rows = await database.update(feedback).set({ ...data, updatedAt: new Date() }).where(and(
+  const patch = pickProvided(input, data);
+  const rows = await database.update(feedback).set({ ...patch, updatedAt: new Date() }).where(and(
     eq(feedback.workspaceId, actor.workspaceId), eq(feedback.id, id(feedbackId)),
   )).returning();
   if (!rows[0]) throw new StrategyError('Feedback not found.', 404);
@@ -419,7 +430,8 @@ export async function createTimeBlock(database: PostgresDatabase, actor: Workspa
 
 export async function updateTimeBlock(database: PostgresDatabase, actor: WorkspaceActor, timeBlockId: string, input: unknown) {
   const data = parse(timeBlockUpdateSchema, input);
-  const rows = await database.update(timeBlock).set({ ...data, updatedAt: new Date() }).where(and(
+  const patch = pickProvided(input, data);
+  const rows = await database.update(timeBlock).set({ ...patch, updatedAt: new Date() }).where(and(
     eq(timeBlock.workspaceId, actor.workspaceId), eq(timeBlock.id, id(timeBlockId)),
   )).returning();
   if (!rows[0]) throw new StrategyError('Time block not found.', 404);
@@ -453,6 +465,7 @@ async function clearOtherActiveWeeks(database: PostgresDatabase, actor: Workspac
 
 export async function createWeekMarker(database: PostgresDatabase, actor: WorkspaceActor, input: unknown) {
   const data = parse(weekMarkerCreateSchema, input);
+  validateWeekWindow(data.startedAt, data.endedAt);
   if (data.status === 'active') await clearOtherActiveWeeks(database, actor);
   try {
     const rows = await database.insert(weekMarker).values({
@@ -472,13 +485,22 @@ export async function createWeekMarker(database: PostgresDatabase, actor: Worksp
 
 export async function updateWeekMarker(database: PostgresDatabase, actor: WorkspaceActor, markerId: string, input: unknown) {
   const data = parse(weekMarkerUpdateSchema, input);
+  const patch = pickProvided(input, data);
   const parsedId = id(markerId);
-  if (data.status === 'active') await clearOtherActiveWeeks(database, actor, parsedId);
+  const currentRows = await database.select().from(weekMarker).where(and(
+    eq(weekMarker.workspaceId, actor.workspaceId),
+    eq(weekMarker.id, parsedId),
+  )).limit(1);
+  if (!currentRows[0]) throw new StrategyError('Week marker not found.', 404);
+  const startedAt = patch.startedAt ?? currentRows[0].startedAt.toISOString();
+  const endedAt = patch.endedAt !== undefined ? patch.endedAt : currentRows[0].endedAt?.toISOString() ?? null;
+  validateWeekWindow(startedAt, endedAt);
+  if (patch.status === 'active') await clearOtherActiveWeeks(database, actor, parsedId);
   const rows = await database.update(weekMarker).set({
-    ...(data.weekNumber !== undefined && { weekNumber: data.weekNumber }),
-    ...(data.status !== undefined && { status: data.status }),
-    ...(data.startedAt !== undefined && { startedAt: new Date(data.startedAt) }),
-    ...(data.endedAt !== undefined && { endedAt: asDate(data.endedAt) }),
+    ...(patch.weekNumber !== undefined && { weekNumber: patch.weekNumber }),
+    ...(patch.status !== undefined && { status: patch.status }),
+    ...(patch.startedAt !== undefined && { startedAt: new Date(patch.startedAt) }),
+    ...(patch.endedAt !== undefined && { endedAt: asDate(patch.endedAt) }),
     updatedAt: new Date(),
   }).where(and(eq(weekMarker.workspaceId, actor.workspaceId), eq(weekMarker.id, parsedId))).returning();
   if (!rows[0]) throw new StrategyError('Week marker not found.', 404);

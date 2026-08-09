@@ -18,7 +18,12 @@ const channelCreateSchema = z.object({
   status: z.enum(['active', 'archived']).default('active'),
   participantIds: z.array(idSchema).max(200).default([]),
 });
-const channelUpdateSchema = channelCreateSchema.partial().refine(
+const channelUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  topic: z.string().trim().max(500).optional(),
+  status: z.enum(['active', 'archived']).optional(),
+  participantIds: z.array(idSchema).max(200).optional(),
+}).refine(
   (value) => Object.keys(value).length > 0,
   'At least one field is required.',
 );
@@ -29,9 +34,12 @@ const participantCreateSchema = z.object({
   description: z.string().trim().max(500).default(''),
   status: z.enum(['active', 'inactive']).default('active'),
 });
-const participantUpdateSchema = participantCreateSchema
-  .omit({ participantType: true })
-  .partial()
+const participantUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(120).optional(),
+  linkedUserId: z.string().min(1).nullable().optional(),
+  description: z.string().trim().max(500).optional(),
+  status: z.enum(['active', 'inactive']).optional(),
+})
   .refine((value) => Object.keys(value).length > 0, 'At least one field is required.');
 const messageCreateSchema = z.object({
   channelId: idSchema,
@@ -160,6 +168,22 @@ export async function listTeamChatChannels(
   return rows.map((row) => serializeChannel(row, memberships.get(row.id) || []));
 }
 
+export async function getTeamChatChannel(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  channelId: string,
+) {
+  const id = parse(idSchema, channelId);
+  const rows = await database
+    .select()
+    .from(teamChatChannel)
+    .where(and(eq(teamChatChannel.id, id), eq(teamChatChannel.workspaceId, actor.workspaceId)))
+    .limit(1);
+  if (!rows[0]) throw new TeamChatError('Channel not found.', 404);
+  const memberships = await participantIdsForChannels(database, actor.workspaceId, [id]);
+  return serializeChannel(rows[0], memberships.get(id) || []);
+}
+
 export async function createTeamChatChannel(
   database: PostgresDatabase,
   actor: WorkspaceActor,
@@ -248,6 +272,14 @@ export async function deleteTeamChatChannel(
   channelId: string,
 ) {
   const id = parse(idSchema, channelId);
+  const messages = await database
+    .select({ id: teamChatMessage.id })
+    .from(teamChatMessage)
+    .where(and(eq(teamChatMessage.channelId, id), eq(teamChatMessage.workspaceId, actor.workspaceId)))
+    .limit(1);
+  if (messages[0]) {
+    throw new TeamChatError('Channels with message history cannot be deleted; archive them instead.', 409);
+  }
   try {
     const rows = await database
       .delete(teamChatChannel)
@@ -284,7 +316,12 @@ export async function addTeamChatParticipantToChannel(
     .values({ workspaceId: actor.workspaceId, channelId: id, participantId: data.participantId })
     .onConflictDoNothing();
   const ids = await participantIdsForChannels(database, actor.workspaceId, [id]);
-  return { data: serializeChannel(channels[0], ids.get(id) || []) };
+  const refreshed = await database
+    .select()
+    .from(teamChatChannel)
+    .where(and(eq(teamChatChannel.id, id), eq(teamChatChannel.workspaceId, actor.workspaceId)))
+    .limit(1);
+  return { data: serializeChannel(refreshed[0] || channels[0], ids.get(id) || []) };
 }
 
 export async function listTeamChatParticipants(
@@ -309,6 +346,21 @@ export async function listTeamChatParticipants(
     .orderBy(desc(teamChatParticipant.updatedAt))
     .limit(100);
   return rows.map(serializeParticipant);
+}
+
+export async function getTeamChatParticipant(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  participantId: string,
+) {
+  const id = parse(idSchema, participantId);
+  const rows = await database
+    .select()
+    .from(teamChatParticipant)
+    .where(and(eq(teamChatParticipant.id, id), eq(teamChatParticipant.workspaceId, actor.workspaceId)))
+    .limit(1);
+  if (!rows[0]) throw new TeamChatError('Participant not found.', 404);
+  return serializeParticipant(rows[0]);
 }
 
 export async function createTeamChatParticipant(
@@ -380,6 +432,14 @@ export async function deleteTeamChatParticipant(
   participantId: string,
 ) {
   const id = parse(idSchema, participantId);
+  const messages = await database
+    .select({ id: teamChatMessage.id })
+    .from(teamChatMessage)
+    .where(and(eq(teamChatMessage.participantId, id), eq(teamChatMessage.workspaceId, actor.workspaceId)))
+    .limit(1);
+  if (messages[0]) {
+    throw new TeamChatError('Participants with message history cannot be deleted; deactivate them instead.', 409);
+  }
   try {
     const rows = await database
       .delete(teamChatParticipant)
@@ -503,4 +563,27 @@ export async function listTeamChatMessages(
     hasMore,
     nextBefore: hasMore ? page.at(-1)?.createdAt.toISOString() ?? null : null,
   };
+}
+
+export async function getTeamChatMessage(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  messageId: string,
+) {
+  const id = parse(idSchema, messageId);
+  const rows = await database
+    .select()
+    .from(teamChatMessage)
+    .where(and(eq(teamChatMessage.id, id), eq(teamChatMessage.workspaceId, actor.workspaceId)))
+    .limit(1);
+  if (!rows[0]) throw new TeamChatError('Message not found.', 404);
+  return serializeMessage(rows[0]);
+}
+
+export async function deleteTeamChatMessage(
+  _database: PostgresDatabase,
+  _actor: WorkspaceActor,
+  _messageId: string,
+) {
+  throw new TeamChatError('Messages are immutable and cannot be deleted.', 409);
 }

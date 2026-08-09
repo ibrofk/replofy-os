@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import posixpath
 import re
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -10,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import parse_qsl, quote
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 import httpx
 from fastmcp import Context, FastMCP
@@ -26,6 +27,7 @@ ResourceName = Literal[
     "prompts",
     "api-endpoints",
     "environments",
+    "environment-deployments",
     "social-posts",
     "creative-items",
     "creative-assets",
@@ -35,6 +37,7 @@ ResourceName = Literal[
     "leads",
     "time-blocks",
     "week-markers",
+    "members",
     "team-chat-channels",
     "team-chat-participants",
     "team-chat-messages",
@@ -51,6 +54,8 @@ ResourceName = Literal[
     "operator-injections",
     "context-sources",
     "context-source-versions",
+    "context-source-items",
+    "context-source-folders",
     "users",
     "companies",
     "invitations",
@@ -85,6 +90,7 @@ RESOURCES: list[str] = [
     "prompts",
     "api-endpoints",
     "environments",
+    "environment-deployments",
     "social-posts",
     "creative-items",
     "creative-assets",
@@ -94,6 +100,7 @@ RESOURCES: list[str] = [
     "leads",
     "time-blocks",
     "week-markers",
+    "members",
     "team-chat-channels",
     "team-chat-participants",
     "team-chat-messages",
@@ -110,6 +117,8 @@ RESOURCES: list[str] = [
     "operator-injections",
     "context-sources",
     "context-source-versions",
+    "context-source-items",
+    "context-source-folders",
     "users",
     "companies",
     "invitations",
@@ -151,6 +160,8 @@ RESOURCE_ALIASES: dict[str, ResourceName] = {
     "apiEndpoints": "api-endpoints",
     "environment": "environments",
     "environments": "environments",
+    "environment-deployment": "environment-deployments",
+    "environment-deployments": "environment-deployments",
     "social-post": "social-posts",
     "social_post": "social-posts",
     "social-posts": "social-posts",
@@ -184,6 +195,8 @@ RESOURCE_ALIASES: dict[str, ResourceName] = {
     "week_markers": "week-markers",
     "week-markers": "week-markers",
     "weekMarkers": "week-markers",
+    "member": "members",
+    "members": "members",
     "team-chat-channel": "team-chat-channels",
     "team-chat-channels": "team-chat-channels",
     "teamChatChannels": "team-chat-channels",
@@ -224,8 +237,14 @@ RESOURCE_ALIASES: dict[str, ResourceName] = {
     "context_source_version": "context-source-versions",
     "context-source-versions": "context-source-versions",
     "contextSourceVersions": "context-source-versions",
-    "user": "users",
-    "users": "users",
+    "context-source-item": "context-source-items",
+    "context-source-items": "context-source-items",
+    "contextSourceItems": "context-source-items",
+    "context-source-folder": "context-source-folders",
+    "context-source-folders": "context-source-folders",
+    "contextSourceFolders": "context-source-folders",
+    "user": "members",
+    "users": "members",
     "company": "companies",
     "companies": "companies",
     "invitation": "invitations",
@@ -275,7 +294,9 @@ RESOURCE_GUIDE: dict[ResourceName, dict[str, Any]] = {
     },
     "environments": {
         "filters": ["name", "status"],
+        "createFields": ["name", "status", "version", "lastSync"],
         "updateFields": ["name", "status", "lastSync", "version"],
+        "notes": ["Deploy and rollback are explicit actions; delete removes deployment history with the environment."],
     },
     "social-posts": {
         "filters": ["platform", "status"],
@@ -428,6 +449,7 @@ RESOURCE_GUIDE: dict[ResourceName, dict[str, Any]] = {
         "notes": [
             "Use list_team_chat_messages for bounded history reads with ISO-8601 after/before filters and pagination.",
             "Messages are immutable and preserve sender name/type snapshots.",
+            "delete_record returns a clear 409 for message history; archive the channel or deactivate the identity instead.",
         ],
     },
     "operator-desks": {
@@ -445,26 +467,28 @@ RESOURCE_GUIDE: dict[ResourceName, dict[str, Any]] = {
     "operator-work-orders": {
         "filters": ["status", "deskId", "assignedToId"],
         "notes": [
-            "Alias for work-orders in the workspace describe_resource surface.",
-            "Use work-orders for CRUD and listing operations.",
+            "Canonical API resource for runnable Operator Desk work orders.",
+            "work-orders is a compatibility alias for the same route.",
         ],
     },
     "operator-context-packs": {
+        "createFields": ["title", "description", "scope", "scopeId", "sourceIds", "sourceSnapshots", "instructions", "constraints", "expectedUse"],
         "notes": [
-            "Workspace alias for operator context pack bundles.",
-            "Use the live workspace context and related resource routes for the underlying records.",
+            "Context packs support list, get, create, and delete.",
         ],
     },
     "operator-checkins": {
+        "filters": ["operatorDeskId", "workOrderId"],
+        "createFields": ["operatorDeskId", "workOrderId", "externalAgentName", "externalAgentProvider", "type", "summary", "payload"],
         "notes": [
-            "Workspace alias for operator check-ins.",
-            "Use the operator workflow or workspace context routes for current records.",
+            "Check-ins support list, get, create, and delete for explicit audit cleanup.",
         ],
     },
     "operator-outputs": {
+        "filters": ["operatorDeskId", "workOrderId", "status"],
+        "createFields": ["operatorDeskId", "workOrderId", "externalAgentName", "outputType", "title", "summary", "content", "structuredPayload", "suggestedDestinations", "sourceReferences", "memorySuggestions", "confidence"],
         "notes": [
-            "Workspace alias for operator output records.",
-            "Use the operator workflow or workspace context routes for current records.",
+            "Outputs support list, get, create, and explicit deletion; routed injections/approvals are handled by the runtime.",
         ],
     },
     "operator-injections": {
@@ -475,22 +499,22 @@ RESOURCE_GUIDE: dict[ResourceName, dict[str, Any]] = {
     },
     "work-orders": {
         "filters": ["status", "deskId", "assignedToId"],
-        "createFields": ["title", "status", "deskId", "payload", "priority"],
+        "createFields": ["operatorDeskId", "title", "brief", "status", "priority", "contextPackIds", "expectedOutputTypes", "approvalMode", "claimPolicy", "assignedExternalAgent", "availableFrom", "dueAt"],
         "notes": [
-            "Work orders represent runnable desk items and should be read through the generic resource routes.",
+            "Compatibility alias for operator-work-orders; it has the same full CRUD and claim/release lifecycle.",
         ],
     },
     "operator-memories": {
-        "filters": ["scope", "type", "confidence"],
-        "createFields": ["title", "content", "scope", "type", "confidence", "status"],
+        "filters": ["scope", "scopeId", "state", "confidence"],
+        "createFields": ["scope", "scopeId", "memoryType", "state", "content", "confidence", "sourceCheckInId", "sourceOutputId", "expiresAt", "pinned", "source", "sourceMetadata"],
     },
     "operator-approvals": {
         "filters": ["status", "resourceType"],
-        "createFields": ["title", "status", "resourceType", "resourceId", "requestedBy"],
+        "notes": ["Approvals are generated by operator outputs and are read or transitioned with approve/reject actions."],
     },
     "mcp-registry": {
         "filters": ["status", "category"],
-        "createFields": ["name", "status", "category", "description", "uri"],
+        "notes": ["The standalone registry is read-only and exposes the supported operator actions."],
     },
     "weekly-changelog": {
         "notes": ["Use the reports route for read-only weekly changelog snapshots."],
@@ -500,6 +524,21 @@ RESOURCE_GUIDE: dict[ResourceName, dict[str, Any]] = {
     },
     "context-source-versions": {
         "filters": ["sourceId", "sourceKey", "status"],
+        "notes": ["Versions are immutable snapshots; delete removes the snapshot and cascades proposed items."],
+    },
+    "context-source-items": {
+        "filters": ["sourceId", "status"],
+        "updateFields": ["status"],
+        "notes": ["Ingestion creates items; MCP can review, archive, read, and delete them."],
+    },
+    "context-source-folders": {
+        "createFields": ["name"],
+        "updateFields": ["name"],
+        "notes": ["Deleting a folder detaches its sources before removing the folder."],
+    },
+    "members": {
+        "filters": [],
+        "notes": ["Workspace members are read-only through MCP; use invitations for membership changes."],
     },
     "users": {
         "filters": ["role", "companyId"],
@@ -515,6 +554,64 @@ RESOURCE_GUIDE: dict[ResourceName, dict[str, Any]] = {
         ],
     },
 }
+
+# The MCP surface is explicit about lifecycle support. A resource that is
+# read-only should fail locally with a useful capability message instead of
+# sending a misleading POST/PATCH/DELETE to a route that cannot exist.
+RESOURCE_OPERATIONS: dict[str, list[str]] = {
+    resource: ["list", "get", "create", "update", "delete"] for resource in RESOURCES
+}
+RESOURCE_OPERATIONS.update({
+    "environment-deployments": ["list"],
+    "members": ["list"],
+    "users": ["list"],
+    "companies": ["list"],
+    "invitations": ["list", "create"],
+    "creative-assets": ["list", "get", "update", "download"],
+    "weekly-changelog": ["list"],
+    "operator-approvals": ["list", "get"],
+    "mcp-registry": ["list"],
+    "operator-injections": ["list", "get"],
+    "operator-outputs": ["list", "get", "create", "delete"],
+    "team-chat-messages": ["list", "get", "create", "delete"],
+    "context-source-versions": ["list", "get", "delete"],
+    "context-source-items": ["list", "get", "update", "delete"],
+})
+
+
+def _assert_operation(resource: ResourceName, operation: str) -> None:
+    supported = RESOURCE_OPERATIONS.get(resource, [])
+    if operation not in supported:
+        raise RuntimeError(
+            f"Resource '{resource}' does not support '{operation}'. "
+            f"Supported operations: {', '.join(supported) or 'none'}."
+        )
+
+
+def _normalize_mcp_request_path(path: str) -> str:
+    if not isinstance(path, str) or not path.strip():
+        raise RuntimeError("path must be a non-empty string.")
+
+    normalized = path.strip()
+    if not normalized.startswith("/api/"):
+        normalized = f"/api/v1/{normalized.lstrip('/')}"
+
+    decoded_path = unquote(urlsplit(normalized).path)
+    return posixpath.normpath(f"/{decoded_path.lstrip('/')}")
+
+
+def _assert_mcp_request_allowed(method: str, path: str) -> str:
+    normalized_method = str(method).upper()
+    normalized_path = _normalize_mcp_request_path(path)
+    api_key_paths = {"/api/api-keys", "/api/v1/api-keys"}
+    normalized_path_without_slash = normalized_path.rstrip("/").lower()
+    if any(
+        normalized_path_without_slash == api_key_path
+        or normalized_path_without_slash.startswith(f"{api_key_path}/")
+        for api_key_path in api_key_paths
+    ):
+        raise RuntimeError(f"API key management is prohibited through MCP ({normalized_method} {normalized_path}).")
+    return normalized_path
 
 CONTEXT_SCOPE_LIMITS: dict[ContextScope, dict[str, int]] = {
     "auto": {
@@ -1247,6 +1344,20 @@ def _normalize_filters(filters: dict[str, Any] | str | None) -> dict[str, Any] |
     if not isinstance(filters, str):
         raise RuntimeError("filters must be either a dictionary or a query-string like 'status=todo&assigneeId=123'.")
 
+    stripped = filters.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("{"):
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("filters JSON is invalid; use an object or a query string like 'status=todo'.") from error
+        if not isinstance(decoded, dict):
+            raise RuntimeError("filters JSON must be an object.")
+        return decoded or None
+    if "=" not in stripped:
+        raise RuntimeError("filters must be a dictionary or a query string like 'status=todo&assigneeId=123'.")
+
     parsed: dict[str, Any] = {}
     for key, value in parse_qsl(filters, keep_blank_values=False):
         if key in parsed:
@@ -1257,7 +1368,9 @@ def _normalize_filters(filters: dict[str, Any] | str | None) -> dict[str, Any] |
                 parsed[key] = [existing, value]
         else:
             parsed[key] = value
-    return parsed or None
+    if not parsed:
+        raise RuntimeError("filters must contain at least one key=value pair.")
+    return parsed
 
 
 def _patch_diff(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -1286,7 +1399,7 @@ async def _request(
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     runtime = _runtime(context)
-    normalized_path = path if path.startswith("/") else f"/{path}"
+    normalized_path = _assert_mcp_request_allowed(method, path)
 
     response = await runtime.client.request(
         method=method,
@@ -1311,6 +1424,26 @@ async def _request(
     return {"data": payload}
 
 
+def _resource_collection_path(
+    resource: ResourceName,
+    filters: dict[str, Any] | None = None,
+) -> str:
+    if resource == "work-orders":
+        return "/api/v1/operator-work-orders"
+    if resource == "context-source-versions" and filters and filters.get("sourceId"):
+        source_id = quote(str(filters["sourceId"]), safe="")
+        return f"/api/v1/context-sources/{source_id}/versions"
+    if resource == "weekly-changelog":
+        return "/api/v1/reports/changelog"
+    return f"/api/v1/{resource}"
+
+
+def _resource_record_path(resource: ResourceName, record_id: str) -> str:
+    if resource == "work-orders":
+        resource = "operator-work-orders"
+    return f"/api/v1/{resource}/{quote(record_id, safe='')}"
+
+
 async def _list_resource(
     context: Context,
     resource: ResourceName,
@@ -1318,10 +1451,18 @@ async def _list_resource(
     limit: int = 50,
     filters: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    if resource == "weekly-changelog":
+        payload = await _request(
+            context,
+            "GET",
+            _resource_collection_path(resource, filters),
+            query={**(filters or {}), "week": (filters or {}).get("week", "current")},
+        )
+        return [payload]
     payload = await _request(
         context,
         "GET",
-        f"/api/v1/{resource}",
+        _resource_collection_path(resource, filters),
         query={**(filters or {}), "limit": _ensure_limit(limit, default=50)},
     )
     return _extract_records(payload)
@@ -1349,7 +1490,7 @@ async def _get_record_with_fallback(
     direct = await _request(
         context,
         "GET",
-        f"/api/v1/{resource}/{record_id}",
+        _resource_record_path(resource, record_id),
     )
     data = direct.get("data") if isinstance(direct.get("data"), dict) else direct
     return {
@@ -1795,7 +1936,8 @@ async def _build_workspace_context(
 
 
 async def _create_record(context: Context, resource: ResourceName, payload: dict[str, Any]) -> dict[str, Any]:
-    return await _request(context, "POST", f"/api/v1/{resource}", body=payload)
+    _assert_operation(resource, "create")
+    return await _request(context, "POST", _resource_collection_path(resource), body=payload)
 
 
 async def _update_record_with_fallback(
@@ -1804,8 +1946,9 @@ async def _update_record_with_fallback(
     record_id: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    _assert_operation(resource, "update")
     try:
-        return await _request(context, "PATCH", f"/api/v1/{resource}/{record_id}", body=payload)
+        return await _request(context, "PATCH", _resource_record_path(resource, record_id), body=payload)
     except RuntimeError as error:
         if not str(error).startswith("404"):
             raise
@@ -1873,7 +2016,7 @@ async def _route_write_result(
     if payload.get("relatedContext") is not None and payload.get("routing") is not None:
         return payload
 
-    data = payload.get("data")
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     resolved_id = record_id
     if resolved_id is None and isinstance(data, dict):
         value = data.get("id")
@@ -1896,7 +2039,7 @@ async def _route_write_result(
 
 @asynccontextmanager
 async def replofy_lifespan(_server: FastMCP):
-    base_url = os.getenv("REPLOFY_OS_BASE_URL", "http://localhost:4000").rstrip("/")
+    base_url = os.getenv("REPLOFY_OS_BASE_URL", "http://localhost:4100").rstrip("/")
     api_key = _require_env("REPLOFY_OS_API_KEY")
     timeout_seconds = float(os.getenv("REPLOFY_OS_TIMEOUT_SECONDS", "30"))
     context_cache_ttl_seconds = float(os.getenv("REPLOFY_OS_CONTEXT_CACHE_SECONDS", "30"))
@@ -1921,7 +2064,7 @@ mcp = FastMCP("Replofy OS", lifespan=replofy_lifespan)
 async def replofy_config() -> str:
     """Return MCP-specific configuration, schema hints, and the recommended startup flow."""
     return _render_json_resource({
-        "baseUrl": os.getenv("REPLOFY_OS_BASE_URL", "http://localhost:4000").rstrip("/"),
+        "baseUrl": os.getenv("REPLOFY_OS_BASE_URL", "http://localhost:4100").rstrip("/"),
         "resources": RESOURCES,
         "recommendedResources": [
             "replofy://context/auto",
@@ -1965,6 +2108,11 @@ async def replofy_config() -> str:
             "create_task",
             "create_focus_stack",
         ],
+        "security": {
+            "apiKeyManagement": "prohibited",
+            "apiKeyCreation": "prohibited",
+            "rawRequestTool": "disabled in Codex; server-side path guard remains active",
+        },
         "resourceGuide": RESOURCE_GUIDE,
         "skillRegistry": {
             "uri": "replofy://skills/registry",
@@ -1981,6 +2129,7 @@ async def replofy_config() -> str:
             "The local Replofy OS skill registry is available at replofy://skills/registry, with individual definitions at replofy://skills/{skill_name}.",
             "Team Chat has dedicated tools for named human and AI-agent identities, atomic channel membership, posting, and time-filtered reads.",
             "create_task and create_seo_keyword can auto-attach the single active cycle goal when unambiguous.",
+            "MCP cannot create, list, or revoke API keys. Manage API keys only through the authenticated Replofy OS settings UI.",
         ],
     })
 
@@ -2105,9 +2254,11 @@ async def server_status(context: Context) -> dict[str, Any]:
 async def describe_resource(resource: str) -> dict[str, Any]:
     """Return resource-specific filter fields, create fields, and behavioral notes."""
     normalized_resource = _normalize_resource_name(resource)
+    guide = dict(RESOURCE_GUIDE.get(normalized_resource, {}))
+    guide["operations"] = RESOURCE_OPERATIONS.get(normalized_resource, [])
     return {
         "resource": normalized_resource,
-        "guide": RESOURCE_GUIDE.get(normalized_resource, {}),
+        "guide": guide,
     }
 
 
@@ -2149,6 +2300,7 @@ async def list_records(
 ) -> dict[str, Any]:
     """List records from a Replofy resource. Use filters for fields like status, role, platform, or companyId."""
     normalized_resource = _normalize_resource_name(resource)
+    _assert_operation(normalized_resource, "list")
     normalized_filters = _normalize_filters(filters)
     records = await _list_resource(context, normalized_resource, limit=limit, filters=normalized_filters)
     return {
@@ -2168,9 +2320,11 @@ async def get_record(
     debug: bool = False,
 ) -> dict[str, Any]:
     """Fetch one record by id with compact deterministic related context."""
+    normalized_resource = _normalize_resource_name(resource)
+    _assert_operation(normalized_resource, "get")
     return await _get_record_with_fallback(
         context,
-        _normalize_resource_name(resource),
+        normalized_resource,
         record_id,
         debug=debug,
     )
@@ -2179,6 +2333,7 @@ async def get_record(
 @mcp.tool()
 async def download_creative_asset(asset_id: str, context: Context) -> dict[str, Any]:
     """Create an authenticated download URL for one active Creative Hub asset."""
+    _assert_operation("creative-assets", "download")
     return await _request(
         context,
         "GET",
@@ -2209,11 +2364,31 @@ async def update_record(
 
 @mcp.tool()
 async def delete_record(resource: str, record_id: str, context: Context) -> dict[str, Any]:
-    """Delete a Replofy record by id. The production API currently may return 404 for valid ids."""
+    """Delete a Replofy record by id, honoring resource-specific archive semantics."""
     normalized_resource = _normalize_resource_name(resource)
+    _assert_operation(normalized_resource, "delete")
     try:
-        result = await _request(context, "DELETE", f"/api/v1/{normalized_resource}/{record_id}")
+        result = await _request(context, "DELETE", _resource_record_path(normalized_resource, record_id))
     except RuntimeError as error:
+        if normalized_resource == "operator-desks" and str(error).startswith("409"):
+            current = await _get_record_with_fallback(context, normalized_resource, record_id)
+            current_data = current.get("data") if isinstance(current.get("data"), dict) else {}
+            if current_data.get("status") == "archived":
+                return {
+                    "ok": True,
+                    "archived": True,
+                    "alreadyArchived": True,
+                    "resource": normalized_resource,
+                    "recordId": record_id,
+                    "data": current_data,
+                }
+            archived = await _request(
+                context,
+                "PATCH",
+                _resource_record_path(normalized_resource, record_id),
+                body={"status": "archived"},
+            )
+            return {"ok": True, "archived": True, "resource": normalized_resource, "recordId": record_id, "data": archived}
         if not str(error).startswith("404"):
             raise
         return {
@@ -2221,7 +2396,7 @@ async def delete_record(resource: str, record_id: str, context: Context) -> dict
             "resource": normalized_resource,
             "recordId": record_id,
             "error": str(error),
-            "note": "Production delete-by-id is currently returning 404. The record may still exist.",
+            "note": "The API reported that this record was not found and no mutation was attempted.",
         }
 
     return result
@@ -2404,8 +2579,7 @@ async def create_task(
     return enriched
 
 
-@mcp.tool()
-async def update_task(
+async def _update_task_impl(
     task_id: str,
     context: Context,
     title: str | None = None,
@@ -2435,9 +2609,33 @@ async def update_task(
 
 
 @mcp.tool()
+async def update_task(
+    task_id: str,
+    context: Context,
+    title: str | None = None,
+    status: str | None = None,
+    effort_points: int | None = None,
+    is_lead_indicator: bool | None = None,
+    cycle_goal_id: str | None = None,
+    assignee_id: str | None = None,
+) -> dict[str, Any]:
+    """Update a task with one or more changed fields."""
+    return await _update_task_impl(
+        task_id=task_id,
+        context=context,
+        title=title,
+        status=status,
+        effort_points=effort_points,
+        is_lead_indicator=is_lead_indicator,
+        cycle_goal_id=cycle_goal_id,
+        assignee_id=assignee_id,
+    )
+
+
+@mcp.tool()
 async def set_task_status(task_id: str, status: str, context: Context) -> dict[str, Any]:
     """Set one task status without building a patch payload manually."""
-    return await update_task(task_id=task_id, context=context, status=status)
+    return await _update_task_impl(task_id=task_id, context=context, status=status)
 
 
 @mcp.tool()
@@ -2883,59 +3081,24 @@ async def create_focus_stack(
     is_lead_indicator: bool = False,
 ) -> dict[str, Any]:
     """Create a vision, one cycle goal, and optional linked tasks as one coherent delivery stack."""
-    await context.report_progress(1, 4, "Creating vision")
-    vision = await _create_record(
+    await context.report_progress(1, 2, "Creating atomic focus stack")
+    result = await _request(
         context,
-        "visions",
-        {
-            "title": vision_title,
-            "description": vision_description,
+        "POST",
+        "/api/v1/focus-stacks",
+        body={
+            "visionTitle": vision_title,
+            "visionDescription": vision_description,
+            "cycleGoalTitle": cycle_goal_title,
+            "cycleGoalDescription": cycle_goal_description,
             "focusItems": focus_items or [],
+            "taskTitles": task_titles or [],
+            "taskEffortPoints": task_effort_points,
+            "isLeadIndicator": is_lead_indicator,
         },
     )
-
-    await context.report_progress(2, 4, "Creating cycle goal")
-    cycle_goal = await _create_record(
-        context,
-        "cycle-goals",
-        {
-            "title": cycle_goal_title,
-            "description": cycle_goal_description,
-            "status": "active",
-        },
-    )
-
-    cycle_goal_id = cycle_goal.get("data", {}).get("id")
-    created_tasks: list[dict[str, Any]] = []
-    if cycle_goal_id and task_titles:
-        for index, task_title in enumerate(task_titles, start=1):
-            await context.report_progress(2 + index / max(len(task_titles), 1), 4, f"Creating task {index}/{len(task_titles)}")
-            task_result = await _request(
-                context,
-                "POST",
-                "/api/v1/tasks",
-                body={
-                    "title": task_title,
-                    "effortPoints": task_effort_points,
-                    "isLeadIndicator": is_lead_indicator,
-                    "cycleGoalId": cycle_goal_id,
-                },
-            )
-            created_tasks.append(task_result.get("data", {}))
-
-    await context.report_progress(4, 4, "Loading related context")
-    routed_goal = (
-        await _get_record_with_fallback(context, "cycle-goals", str(cycle_goal_id))
-        if cycle_goal_id
-        else {}
-    )
-    return {
-        "vision": vision.get("data"),
-        "cycleGoal": routed_goal.get("data", cycle_goal.get("data")),
-        "tasks": created_tasks,
-        "relatedContext": routed_goal.get("relatedContext"),
-        "routing": routed_goal.get("routing"),
-    }
+    await context.report_progress(2, 2, "Focus stack committed")
+    return result
 
 
 @mcp.tool()

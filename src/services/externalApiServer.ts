@@ -4587,6 +4587,13 @@ export async function handleExternalApiRequest(
   const path = url.pathname.replace(/^\/api\/v1\/?/, '');
   const segments = path ? path.split('/').filter(Boolean) : [];
 
+  // API keys are managed only from the authenticated Replofy OS settings UI.
+  // Keep this deny-list before generic resource routing so future MCP routes
+  // cannot accidentally expose key creation, listing, or revocation.
+  if (segments[0]?.toLowerCase() === 'api-keys') {
+    throw new ApiKeyServerError('API key management is prohibited through MCP.', 403);
+  }
+
   if (segments[0] === 'openapi.json') {
     if (normalizedMethod !== 'GET') {
       throw new ApiKeyServerError('Method not allowed.', 405);

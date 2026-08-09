@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { bug, roadmapItem, task } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
+import { pickProvided } from './validation.js';
 
 const bugSeverities = ['low', 'medium', 'high', 'critical'] as const;
 const bugStatuses = ['open', 'triaged', 'in-progress', 'blocked', 'resolved', 'closed'] as const;
@@ -124,9 +125,10 @@ export async function createBug(database: PostgresDatabase, actor: WorkspaceActo
 export async function updateBug(database: PostgresDatabase, actor: WorkspaceActor, bugId: string, input: unknown) {
   const id = parse(z.string().uuid(), bugId);
   const data = parse(bugCreateSchema.partial(), input);
-  const linkedTaskIds = data.linkedTaskIds === undefined ? undefined : await validateTaskIds(database, actor, data.linkedTaskIds);
+  const patch = pickProvided(input, data);
+  const linkedTaskIds = patch.linkedTaskIds === undefined ? undefined : await validateTaskIds(database, actor, patch.linkedTaskIds);
   const rows = await database.update(bug).set({
-    ...data,
+    ...patch,
     ...(linkedTaskIds !== undefined && { linkedTaskIds }),
     updatedAt: new Date(),
   }).where(and(eq(bug.workspaceId, actor.workspaceId), eq(bug.id, id))).returning();
@@ -178,9 +180,10 @@ export async function createRoadmapItem(database: PostgresDatabase, actor: Works
 export async function updateRoadmapItem(database: PostgresDatabase, actor: WorkspaceActor, itemId: string, input: unknown) {
   const id = parse(z.string().uuid(), itemId);
   const data = parse(roadmapCreateSchema.partial(), input);
-  const linkedTaskIds = data.linkedTaskIds === undefined ? undefined : await validateTaskIds(database, actor, data.linkedTaskIds);
+  const patch = pickProvided(input, data);
+  const linkedTaskIds = patch.linkedTaskIds === undefined ? undefined : await validateTaskIds(database, actor, patch.linkedTaskIds);
   const rows = await database.update(roadmapItem).set({
-    ...data,
+    ...patch,
     ...(linkedTaskIds !== undefined && { linkedTaskIds }),
     updatedAt: new Date(),
   }).where(and(eq(roadmapItem.workspaceId, actor.workspaceId), eq(roadmapItem.id, id))).returning();
