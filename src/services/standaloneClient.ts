@@ -86,7 +86,11 @@ export type StandaloneApiKeyScope =
   | 'technical:read'
   | 'technical:write'
   | 'systems:read'
-  | 'systems:write';
+  | 'systems:write'
+  | 'ai:read'
+  | 'ai:write'
+  | 'ai:approve'
+  | 'ai:admin';
 
 export type StandaloneEnvironmentDeployment = {
   id: string;
@@ -176,6 +180,115 @@ export type StandaloneWorkspaceEvent = {
   data: unknown;
 };
 
+export type AIProviderId = 'gemini' | 'openai' | 'anthropic';
+export type AIEngineStatus = 'inactive_missing_provider_key' | 'inactive_missing_model' | 'active' | 'degraded_memory' | 'provider_error';
+export type AIContextMode = 'focused' | 'workspace' | 'deep';
+export type AIContextStats = {
+  mode: AIContextMode;
+  memoryCount: number;
+  sourceCount: number;
+  projectedSourceCount: number;
+  selectedRecordCount: number;
+  conversationMessageCount: number;
+  domainPartCount: number;
+  projection: 'enabled' | 'database-fallback' | 'degraded';
+};
+export type AIProviderModel = {
+  id: string;
+  label: string;
+  description: string | null;
+  createdAt: string | null;
+  contextWindow: number | null;
+  capabilities: string[];
+  recommended: boolean;
+};
+export type AIContextEnvelope = {
+  route?: string;
+  resourceType?: string;
+  resourceId?: string;
+  selectedRecords?: Record<string, unknown>[];
+  attachments?: AIContextAttachment[];
+  sourceIds?: string[];
+  sourceVersionIds?: string[];
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  userPrompt: string;
+  metadata?: Record<string, unknown>;
+};
+export type AIContextAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  dataUrl: string;
+};
+export type AIAction = {
+  operation: 'create' | 'update' | 'draft' | 'link' | 'comment' | 'remember' | 'archive';
+  resourceType: string;
+  targetId?: string | null;
+  payload: Record<string, unknown>;
+  rationale: string;
+  confidence: 'low' | 'medium' | 'high';
+  sourceReferences: Record<string, unknown>[];
+  requiresApproval: boolean;
+};
+export type AIMemoryMutation = {
+  operation: 'create' | 'update' | 'merge' | 'expire' | 'archive';
+  memoryId?: string;
+  mergeMemoryIds: string[];
+  scope: OperatorMemory['scope'];
+  scopeId?: string | null;
+  memoryType: OperatorMemory['memoryType'];
+  content: string;
+  confidence: OperatorMemory['confidence'];
+  expiresAt?: string | null;
+  pinned?: boolean;
+  reason: string;
+  sourceReferences: Record<string, unknown>[];
+};
+export type AIRunOutput = {
+  answer: string;
+  summary: string;
+  actionability: 'actionable' | 'insufficient_evidence';
+  assumptions: string[];
+  sourceReferences: Record<string, unknown>[];
+  actions: AIAction[];
+  memoryMutations: AIMemoryMutation[];
+};
+export type AIRunResult = {
+  runId: string;
+  status: 'succeeded';
+  output: AIRunOutput;
+  proposalId: string | null;
+  memoryResults: Record<string, unknown>[];
+  usage: Record<string, unknown>;
+  contextStats?: AIContextStats;
+};
+export type AISettingsResponse = {
+  settings: {
+    defaultProvider: AIProviderId | null;
+    defaultModel: string | null;
+    fallbackEnabled: boolean;
+    memoryServiceUrl: string | null;
+    memoryServiceStatus: string;
+  };
+  activation: {
+    status: AIEngineStatus;
+    provider: AIProviderId | null;
+    model: string | null;
+    credentialId: string | null;
+    fallbackEnabled: boolean;
+  };
+  credentials: Array<{
+    id: string;
+    provider: AIProviderId;
+    label: string;
+    configured: boolean;
+    lastTestedAt: string | null;
+    lastError: string | null;
+    createdAt: string;
+  }>;
+};
+
 export class StandaloneApiError extends Error {
   constructor(
     message: string,
@@ -201,7 +314,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function jsonRequest(method: 'POST' | 'PATCH', body: unknown): RequestInit {
+function jsonRequest(method: 'POST' | 'PATCH' | 'PUT', body: unknown): RequestInit {
   return { method, body: JSON.stringify(body) };
 }
 
@@ -651,6 +764,73 @@ export const standaloneClient = {
       `/api/v1/operator-approvals/${encodeURIComponent(approvalId)}/reject`,
       jsonRequest('POST', { reason }),
     ),
+  getAIStatus: () => request<{
+    status: AIEngineStatus;
+    provider: AIProviderId | null;
+    model: string | null;
+    credentialId: string | null;
+    fallbackEnabled: boolean;
+    memoryProjection: string;
+    active: boolean;
+  }>('/api/v1/ai/status'),
+  getAISettings: () => request<AISettingsResponse>('/api/v1/ai/settings'),
+  listAIProviders: () => request<{ data: Array<{ provider: AIProviderId; configured: boolean; credential: Record<string, unknown> | null }> }>('/api/v1/ai/providers'),
+  listAIProviderModels: (provider: AIProviderId) => request<{ data: AIProviderModel[]; provider: AIProviderId; fetchedAt: string }>(
+    `/api/v1/ai/providers/${provider}/models`,
+  ),
+  updateAISettings: (input: {
+    defaultProvider?: AIProviderId | null;
+    defaultModel?: string | null;
+    fallbackEnabled?: boolean;
+    memoryServiceUrl?: string | null;
+  }) => request<AISettingsResponse>('/api/v1/ai/settings', { method: 'PUT', body: JSON.stringify(input) }),
+  saveAIProviderKey: (provider: AIProviderId, apiKey: string, label?: string) => request<{
+    id: string;
+    provider: AIProviderId;
+    label: string;
+    configured: boolean;
+    lastTestedAt: string | null;
+    lastError: string | null;
+  }>(`/api/v1/ai/providers/${provider}`, jsonRequest('PUT', { apiKey, label })),
+  deleteAIProviderKey: (provider: AIProviderId) => request<{ id: string | null; deleted: boolean }>(
+    `/api/v1/ai/providers/${provider}`,
+    { method: 'DELETE' },
+  ),
+  testAIProvider: (provider: AIProviderId, model: string) => request<{ ok: true; provider: AIProviderId; model: string }>(
+    `/api/v1/ai/providers/${provider}/test`,
+    jsonRequest('POST', { model }),
+  ),
+  listAIAgents: () => request<CollectionResponse<Record<string, unknown>>>('/api/v1/ai/agents'),
+  createAIAgent: (input: Record<string, unknown>) => request<Record<string, unknown>>('/api/v1/ai/agents', jsonRequest('POST', input)),
+  updateAIAgent: (id: string, input: Record<string, unknown>) => request<Record<string, unknown>>(`/api/v1/ai/agents/${encodeURIComponent(id)}`, jsonRequest('PATCH', input)),
+  runAI: (input: { surface?: 'chat' | 'analyze' | 'inline' | 'operator' | 'system'; context: AIContextEnvelope; agentProfileId?: string }) => request<AIRunResult>('/api/v1/ai/runs', jsonRequest('POST', input)),
+  analyzeWithAI: (context: AIContextEnvelope, agentProfileId?: string) => request<AIRunResult>('/api/v1/ai/analyze', jsonRequest('POST', { context, agentProfileId })),
+  listAIRuns: () => request<CollectionResponse<Record<string, unknown>>>('/api/v1/ai/runs'),
+  enqueueAIJob: (input: {
+    type: 'analyze_source' | 'generate_proposal' | 'apply_memory_mutations' | 'index_memory' | 'index_context' | 'reindex_workspace' | 'delete_source_projection' | 'learn_patterns';
+    payload?: Record<string, unknown>;
+    runId?: string;
+    idempotencyKey?: string;
+  }) => request<Record<string, unknown>>('/api/v1/ai/jobs', jsonRequest('POST', input)),
+  createAIChatSession: (title?: string, context?: Record<string, unknown>) => request<Record<string, unknown>>('/api/v1/ai/chat/sessions', jsonRequest('POST', { title, context })),
+  listAIChatSessions: () => request<CollectionResponse<Record<string, unknown>>>('/api/v1/ai/chat/sessions'),
+  listAIChatMessages: (sessionId: string) => request<CollectionResponse<Record<string, unknown>>>(`/api/v1/ai/chat/sessions/${encodeURIComponent(sessionId)}/messages`),
+  sendAIChatMessage: (sessionId: string, content: string, context?: Partial<AIContextEnvelope>) => request<{
+    userMessage: Record<string, unknown>;
+    assistantMessage: Record<string, unknown>;
+    run: AIRunResult;
+  }>(`/api/v1/ai/chat/sessions/${encodeURIComponent(sessionId)}/messages`, jsonRequest('POST', { content, context })),
+  listAIProposals: () => request<CollectionResponse<Record<string, unknown>>>('/api/v1/ai/proposals'),
+  getAIProposal: (id: string) => request<Record<string, unknown>>(`/api/v1/ai/proposals/${encodeURIComponent(id)}`),
+  approveAIProposalAction: (proposalId: string, actionId: string) => request<Record<string, unknown>>(`/api/v1/ai/proposals/${encodeURIComponent(proposalId)}/actions/${encodeURIComponent(actionId)}/approve`, jsonRequest('POST', {})),
+  rejectAIProposalAction: (proposalId: string, actionId: string) => request<Record<string, unknown>>(`/api/v1/ai/proposals/${encodeURIComponent(proposalId)}/actions/${encodeURIComponent(actionId)}/reject`, jsonRequest('POST', {})),
+  editAIProposalAction: (proposalId: string, actionId: string, input: { payload?: Record<string, unknown>; rationale?: string }) => request<Record<string, unknown>>(`/api/v1/ai/proposals/${encodeURIComponent(proposalId)}/actions/${encodeURIComponent(actionId)}`, jsonRequest('PATCH', input)),
+  applyAIProposalAction: (proposalId: string, actionId: string) => request<Record<string, unknown>>(`/api/v1/ai/proposals/${encodeURIComponent(proposalId)}/actions/${encodeURIComponent(actionId)}/apply`, jsonRequest('POST', {})),
+  applyAIProposal: (proposalId: string) => request<Record<string, unknown>>(`/api/v1/ai/proposals/${encodeURIComponent(proposalId)}/apply`, jsonRequest('POST', {})),
+  listAIMemories: (query?: string) => request<CollectionResponse<OperatorMemory>>(`/api/v1/ai/memory${query ? `?query=${encodeURIComponent(query)}` : ''}`),
+  listAIMemoryHistory: (memoryId: string) => request<CollectionResponse<Record<string, unknown>>>(`/api/v1/ai/memory/${encodeURIComponent(memoryId)}/history`),
+  undoAIMemoryRevision: (memoryId: string, revisionId: string) => request<Record<string, unknown>>(`/api/v1/ai/memory/${encodeURIComponent(memoryId)}/undo`, jsonRequest('POST', { revisionId })),
+  reindexAIMemory: () => request<Record<string, unknown>>('/api/v1/ai/memory/reindex', jsonRequest('POST', {})),
   invitation: (token: string) =>
     request<{
       email: string;

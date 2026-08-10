@@ -43,6 +43,7 @@ jobs:
       - run: npm run check:licenses
       - run: npm run check:dependencies
       - run: npm run lint
+      - run: npm run test:api-key-scopes
       - run: npm run test:context-routing
       - run: npm run test:standalone-client
       - run: npm run test:asset-store

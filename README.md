@@ -49,7 +49,10 @@ preview Compose stack. The standalone browser currently covers Execution,
 Tasks, Team Chat, structured Content, Strategy, Creative Hub, Growth Pipeline,
 Technical Studio, Systems (environment state, endpoint inventory, and
 deployment history), Plans & Context (revisioned plans plus reviewable
-ingestion), Operator Desks, and Team management.
+ingestion), Operator Desks, Team management, and the workspace-wide AI context
+engine. The standalone header exposes AI status, `/settings` for provider/model
+configuration and provider testing, and `/ai` for chat, source analysis,
+proposals, autonomous memory history, and run diagnostics.
 
 Standalone application services consume explicit `WorkspaceRepository`,
 `AuthProvider`, `AIProvider`, `AssetStore`, and `WorkspaceEventBus` boundaries.

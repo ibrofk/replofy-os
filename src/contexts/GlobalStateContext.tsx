@@ -49,6 +49,7 @@ interface GlobalState {
   creativeItems: CreativeItem[];
   creativeAssets: CreativeAsset[];
   isLoaded: boolean;
+  loadError: string | null;
 }
 
 interface GlobalStateContextValue extends GlobalState {}
@@ -92,9 +93,11 @@ export function GlobalStateProvider({ companyId, uid, children }: GlobalStatePro
   const [creativeItems, setCreativeItems] = useState<CreativeItem[]>([]);
   const [creativeAssets, setCreativeAssets] = useState<CreativeAsset[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!uid) return;
+    setLoadError(null);
 
     if (import.meta.env.VITE_REPLOFY_PLATFORM === 'standalone') {
       let disposed = false;
@@ -122,7 +125,7 @@ export function GlobalStateProvider({ companyId, uid, children }: GlobalStatePro
       };
       const unsubscribe = subscribeToStandaloneEvents(applyEvent);
 
-      Promise.all([
+      Promise.allSettled([
         standaloneClient.listTasks(),
         standaloneClient.listCycleGoals(),
         standaloneClient.listVisions(),
@@ -144,25 +147,52 @@ export function GlobalStateProvider({ companyId, uid, children }: GlobalStatePro
         standaloneClient.listCreativeAssets(),
       ]).then(([taskResult, goalResult, visionResult, memberResult, bugResult, roadmapResult, blogResult, endpointResult, environmentResult, promptResult, socialResult, keywordResult, feedbackResult, accountResult, leadResult, timeBlockResult, contextSourceResult, creativeItemResult, creativeAssetResult]) => {
         if (disposed) return;
-        setTasks(taskResult.data);
-        setCycleGoals(goalResult.data);
-        setVisions(visionResult.data);
-        setBugs(bugResult.data);
-        setRoadmapItems(roadmapResult.data);
-        setBlogArticles(blogResult.data);
-        setApiEndpoints(endpointResult.data);
-        setEnvironments(environmentResult.data);
-        setPrompts(promptResult.data);
-        setSocialPosts(socialResult.data);
-        setSeoKeywords(keywordResult.data);
-        setFeedbacks(feedbackResult.data);
-        setAccounts(accountResult.data);
-        setLeads(leadResult.data);
-        setTimeBlocks(timeBlockResult.data);
-        setContextSources(contextSourceResult.data);
-        setCreativeItems(creativeItemResult.data);
-        setCreativeAssets(creativeAssetResult.data);
-        setTeamMembers(memberResult.data.map((member) => ({
+        const dataOrEmpty = <T,>(result: PromiseSettledResult<{ data: T[] }>) =>
+          result.status === 'fulfilled' ? result.value.data : [];
+        const failed = [
+          taskResult,
+          goalResult,
+          visionResult,
+          memberResult,
+          bugResult,
+          roadmapResult,
+          blogResult,
+          endpointResult,
+          environmentResult,
+          promptResult,
+          socialResult,
+          keywordResult,
+          feedbackResult,
+          accountResult,
+          leadResult,
+          timeBlockResult,
+          contextSourceResult,
+          creativeItemResult,
+          creativeAssetResult,
+        ].some((result) => result.status === 'rejected');
+        if (failed) {
+          console.error('[GlobalState] One or more standalone collections failed to load.');
+          setLoadError('Some workspace data could not be loaded. Refresh to retry.');
+        }
+        setTasks(dataOrEmpty(taskResult));
+        setCycleGoals(dataOrEmpty(goalResult));
+        setVisions(dataOrEmpty(visionResult));
+        setBugs(dataOrEmpty(bugResult));
+        setRoadmapItems(dataOrEmpty(roadmapResult));
+        setBlogArticles(dataOrEmpty(blogResult));
+        setApiEndpoints(dataOrEmpty(endpointResult));
+        setEnvironments(dataOrEmpty(environmentResult));
+        setPrompts(dataOrEmpty(promptResult));
+        setSocialPosts(dataOrEmpty(socialResult));
+        setSeoKeywords(dataOrEmpty(keywordResult));
+        setFeedbacks(dataOrEmpty(feedbackResult));
+        setAccounts(dataOrEmpty(accountResult));
+        setLeads(dataOrEmpty(leadResult));
+        setTimeBlocks(dataOrEmpty(timeBlockResult));
+        setContextSources(dataOrEmpty(contextSourceResult));
+        setCreativeItems(dataOrEmpty(creativeItemResult));
+        setCreativeAssets(dataOrEmpty(creativeAssetResult));
+        setTeamMembers(dataOrEmpty(memberResult).map((member) => ({
           ...member,
           role: member.role === 'owner' ? 'master-admin' as const : member.role,
         })));
@@ -170,12 +200,14 @@ export function GlobalStateProvider({ companyId, uid, children }: GlobalStatePro
       }).catch((error) => {
         if (disposed) return;
         console.error('[GlobalState] Failed to load standalone execution data:', error);
+        setLoadError('Workspace data could not be loaded. Refresh to retry.');
         setIsLoaded(true);
       });
 
       return () => {
         disposed = true;
         unsubscribe();
+        setLoadError(null);
         setIsLoaded(false);
       };
     }
@@ -247,6 +279,7 @@ export function GlobalStateProvider({ companyId, uid, children }: GlobalStatePro
     })().catch((error) => {
       if (!disposed) {
         console.error('[GlobalState] Failed to initialize Firebase subscriptions:', error);
+        setLoadError('Workspace data could not be loaded. Refresh to retry.');
         setIsLoaded(true);
       }
     });
@@ -258,6 +291,7 @@ export function GlobalStateProvider({ companyId, uid, children }: GlobalStatePro
           console.warn('[GlobalState] Error during cleanup:', e);
         }
       });
+      setLoadError(null);
       setIsLoaded(false);
     };
   }, [companyId, uid]);
@@ -283,10 +317,16 @@ export function GlobalStateProvider({ companyId, uid, children }: GlobalStatePro
     creativeItems,
     creativeAssets,
     isLoaded,
+    loadError,
   };
 
   return (
     <GlobalStateContext.Provider value={value}>
+      {loadError && (
+        <div className="fixed left-1/2 top-3 z-[60] -translate-x-1/2 rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 shadow-sm" role="alert">
+          {loadError}
+        </div>
+      )}
       {children}
     </GlobalStateContext.Provider>
   );

@@ -198,6 +198,9 @@ export const cycleGoal = pgTable(
     createdByUserId: text('created_by_user_id').notNull(),
     title: text('title').notNull(),
     description: text('description').notNull().default(''),
+    outcome: text('outcome').notNull().default(''),
+    successCriteria: text('success_criteria').array().notNull().default(sql`'{}'::text[]`),
+    targetDate: timestamp('target_date', { mode: 'date', withTimezone: true }),
     status: cycleGoalStatus('status').notNull().default('active'),
     sourceLineage: jsonb('source_lineage').$type<SourceLineageData>().notNull().default({}),
     ...timestampColumns,
@@ -421,6 +424,8 @@ export const task = pgTable(
     assigneeUserId: text('assignee_user_id'),
     completedAt: timestamp('completed_at', { mode: 'date', withTimezone: true }),
     executionNotes: text('execution_notes').notNull().default(''),
+    acceptanceCriteria: text('acceptance_criteria').array().notNull().default(sql`'{}'::text[]`),
+    planOrder: integer('plan_order'),
     sourceLineage: jsonb('source_lineage').$type<SourceLineageData>().notNull().default({}),
     ...timestampColumns,
   },
@@ -1536,6 +1541,11 @@ export const operatorMemory = pgTable(
     usedCount: integer('used_count').notNull().default(0),
     source: text('source').notNull().default('api'),
     sourceMetadata: jsonb('source_metadata').$type<Record<string, unknown>>().notNull().default({}),
+    sourceRunId: uuid('source_run_id'),
+    supersededMemoryId: uuid('superseded_memory_id'),
+    evidenceMetadata: jsonb('evidence_metadata').$type<Record<string, unknown>>().notNull().default({}),
+    revision: integer('revision').notNull().default(1),
+    archivedAt: timestamp('archived_at', { mode: 'date', withTimezone: true }),
     createdByUserId: text('created_by_user_id').notNull(),
     ...timestampColumns,
   },
@@ -1547,6 +1557,370 @@ export const operatorMemory = pgTable(
       foreignColumns: [workspaceMembership.workspaceId, workspaceMembership.userId],
       name: 'operator_memory_creator_membership_fk',
     }).onDelete('restrict'),
+  ],
+);
+
+export const aiProvider = pgEnum('ai_provider', ['gemini', 'openai', 'anthropic']);
+export const aiRunSurface = pgEnum('ai_run_surface', ['chat', 'analyze', 'inline', 'operator', 'system']);
+export const aiRunStatus = pgEnum('ai_run_status', ['queued', 'running', 'succeeded', 'failed', 'blocked', 'cancelled']);
+export const aiJobType = pgEnum('ai_job_type', [
+  'analyze_source',
+  'generate_proposal',
+  'apply_memory_mutations',
+  'index_memory',
+  'index_context',
+  'reindex_workspace',
+  'delete_source_projection',
+  'learn_patterns',
+]);
+export const aiJobStatus = pgEnum('ai_job_status', ['queued', 'running', 'succeeded', 'failed', 'blocked', 'cancelled']);
+export const aiAgentStatus = pgEnum('ai_agent_status', ['active', 'paused', 'archived']);
+export const aiChatMessageRole = pgEnum('ai_chat_message_role', ['user', 'assistant', 'tool', 'system']);
+export const aiProposalStatus = pgEnum('ai_proposal_status', [
+  'pending_review',
+  'partially_approved',
+  'applied',
+  'rejected',
+  'expired',
+  'failed',
+]);
+export const aiActionOperation = pgEnum('ai_action_operation', [
+  'create',
+  'update',
+  'draft',
+  'link',
+  'comment',
+  'remember',
+  'archive',
+]);
+export const aiProposalActionStatus = pgEnum('ai_proposal_action_status', [
+  'pending',
+  'approved',
+  'rejected',
+  'applied',
+  'conflict',
+  'failed',
+]);
+export const aiMemoryRevisionOperation = pgEnum('ai_memory_revision_operation', [
+  'create',
+  'update',
+  'merge',
+  'expire',
+  'archive',
+  'restore',
+]);
+
+export const aiWorkspaceSettings = pgTable(
+  'ai_workspace_settings',
+  {
+    workspaceId: uuid('workspace_id')
+      .primaryKey()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    defaultProvider: aiProvider('default_provider'),
+    defaultModel: text('default_model'),
+    fallbackEnabled: boolean('fallback_enabled').notNull().default(false),
+    memoryServiceUrl: text('memory_service_url'),
+    memoryServiceStatus: text('memory_service_status').notNull().default('not_configured'),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.workspaceId, table.createdByUserId],
+      foreignColumns: [workspaceMembership.workspaceId, workspaceMembership.userId],
+      name: 'ai_workspace_settings_creator_membership_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const aiProviderCredential = pgTable(
+  'ai_provider_credential',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    provider: aiProvider('provider').notNull(),
+    label: text('label').notNull().default('Workspace key'),
+    ciphertext: text('ciphertext').notNull(),
+    iv: text('iv').notNull(),
+    authTag: text('auth_tag').notNull(),
+    keyVersion: integer('key_version').notNull().default(1),
+    lastTestedAt: timestamp('last_tested_at', { mode: 'date', withTimezone: true }),
+    lastError: text('last_error'),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    uniqueIndex('ai_provider_credential_workspace_provider_uidx').on(table.workspaceId, table.provider),
+    index('ai_provider_credential_workspace_idx').on(table.workspaceId),
+    foreignKey({
+      columns: [table.workspaceId, table.createdByUserId],
+      foreignColumns: [workspaceMembership.workspaceId, workspaceMembership.userId],
+      name: 'ai_provider_credential_creator_membership_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const aiAgentProfile = pgTable(
+  'ai_agent_profile',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    slug: text('slug').notNull(),
+    mission: text('mission').notNull().default(''),
+    instructions: text('instructions').notNull().default(''),
+    allowedResourceTypes: text('allowed_resource_types').array().notNull().default(sql`'{}'::text[]`),
+    allowedTools: text('allowed_tools').array().notNull().default(sql`'{}'::text[]`),
+    provider: aiProvider('provider'),
+    model: text('model'),
+    status: aiAgentStatus('status').notNull().default('active'),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    uniqueIndex('ai_agent_profile_workspace_id_id_uidx').on(table.workspaceId, table.id),
+    uniqueIndex('ai_agent_profile_workspace_slug_uidx').on(table.workspaceId, table.slug),
+    index('ai_agent_profile_workspace_status_idx').on(table.workspaceId, table.status),
+    foreignKey({
+      columns: [table.workspaceId, table.createdByUserId],
+      foreignColumns: [workspaceMembership.workspaceId, workspaceMembership.userId],
+      name: 'ai_agent_profile_creator_membership_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const aiRun = pgTable(
+  'ai_run',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    surface: aiRunSurface('surface').notNull(),
+    status: aiRunStatus('status').notNull().default('queued'),
+    provider: aiProvider('provider'),
+    model: text('model'),
+    agentProfileId: uuid('agent_profile_id'),
+    input: jsonb('input').$type<Record<string, unknown>>().notNull().default({}),
+    output: jsonb('output').$type<Record<string, unknown>>().notNull().default({}),
+    sourceReferences: jsonb('source_references').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    usage: jsonb('usage').$type<Record<string, unknown>>().notNull().default({}),
+    contextDigest: text('context_digest'),
+    error: text('error'),
+    startedAt: timestamp('started_at', { mode: 'date', withTimezone: true }),
+    completedAt: timestamp('completed_at', { mode: 'date', withTimezone: true }),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    index('ai_run_workspace_created_idx').on(table.workspaceId, table.createdAt),
+    index('ai_run_workspace_status_idx').on(table.workspaceId, table.status),
+    foreignKey({
+      columns: [table.workspaceId, table.createdByUserId],
+      foreignColumns: [workspaceMembership.workspaceId, workspaceMembership.userId],
+      name: 'ai_run_creator_membership_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.workspaceId, table.agentProfileId],
+      foreignColumns: [aiAgentProfile.workspaceId, aiAgentProfile.id],
+      name: 'ai_run_agent_profile_workspace_fk',
+    }).onDelete('set null'),
+  ],
+);
+
+export const aiJob = pgTable(
+  'ai_job',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => aiRun.id, { onDelete: 'cascade' }),
+    type: aiJobType('type').notNull(),
+    status: aiJobStatus('status').notNull().default('queued'),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    result: jsonb('result').$type<Record<string, unknown>>().notNull().default({}),
+    idempotencyKey: text('idempotency_key'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(3),
+    availableAt: timestamp('available_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
+    lockedAt: timestamp('locked_at', { mode: 'date', withTimezone: true }),
+    lockedBy: text('locked_by'),
+    lastError: text('last_error'),
+    ...timestampColumns,
+  },
+  (table) => [
+    uniqueIndex('ai_job_workspace_idempotency_uidx').on(table.workspaceId, table.idempotencyKey),
+    index('ai_job_queue_idx').on(table.status, table.availableAt),
+    index('ai_job_workspace_status_idx').on(table.workspaceId, table.status),
+  ],
+);
+
+export const aiChatSession = pgTable(
+  'ai_chat_session',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    title: text('title').notNull().default('New AI conversation'),
+    context: jsonb('context').$type<Record<string, unknown>>().notNull().default({}),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    index('ai_chat_session_workspace_created_idx').on(table.workspaceId, table.createdAt),
+    foreignKey({
+      columns: [table.workspaceId, table.createdByUserId],
+      foreignColumns: [workspaceMembership.workspaceId, workspaceMembership.userId],
+      name: 'ai_chat_session_creator_membership_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const aiChatMessage = pgTable(
+  'ai_chat_message',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => aiChatSession.id, { onDelete: 'cascade' }),
+    role: aiChatMessageRole('role').notNull(),
+    content: text('content').notNull(),
+    structuredPayload: jsonb('structured_payload').$type<Record<string, unknown>>().notNull().default({}),
+    sourceReferences: jsonb('source_references').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    aiRunId: uuid('ai_run_id').references(() => aiRun.id, { onDelete: 'set null' }),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    index('ai_chat_message_session_created_idx').on(table.sessionId, table.createdAt),
+  ],
+);
+
+export const aiProposal = pgTable(
+  'ai_proposal',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id').references(() => aiRun.id, { onDelete: 'set null' }),
+    surface: aiRunSurface('surface').notNull(),
+    title: text('title').notNull(),
+    summary: text('summary').notNull().default(''),
+    assumptions: text('assumptions').array().notNull().default(sql`'{}'::text[]`),
+    sourceReferences: jsonb('source_references').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    status: aiProposalStatus('status').notNull().default('pending_review'),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    index('ai_proposal_workspace_status_idx').on(table.workspaceId, table.status),
+    index('ai_proposal_workspace_created_idx').on(table.workspaceId, table.createdAt),
+  ],
+);
+
+export const aiProposalAction = pgTable(
+  'ai_proposal_action',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    proposalId: uuid('proposal_id')
+      .notNull()
+      .references(() => aiProposal.id, { onDelete: 'cascade' }),
+    operation: aiActionOperation('operation').notNull(),
+    resourceType: text('resource_type').notNull(),
+    targetId: text('target_id'),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    rationale: text('rationale').notNull().default(''),
+    confidence: operatorMemoryConfidence('confidence').notNull().default('medium'),
+    sourceReferences: jsonb('source_references').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    requiresApproval: boolean('requires_approval').notNull().default(true),
+    status: aiProposalActionStatus('status').notNull().default('pending'),
+    result: jsonb('result').$type<Record<string, unknown>>().notNull().default({}),
+    error: text('error'),
+    reviewedByUserId: text('reviewed_by_user_id'),
+    reviewedAt: timestamp('reviewed_at', { mode: 'date', withTimezone: true }),
+    appliedAt: timestamp('applied_at', { mode: 'date', withTimezone: true }),
+    ...timestampColumns,
+  },
+  (table) => [
+    index('ai_proposal_action_workspace_status_idx').on(table.workspaceId, table.status),
+    index('ai_proposal_action_proposal_idx').on(table.proposalId),
+  ],
+);
+
+export const aiSourceAnalysis = pgTable(
+  'ai_source_analysis',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    sourceId: uuid('source_id').notNull(),
+    sourceVersionId: uuid('source_version_id').notNull(),
+    runId: uuid('run_id').references(() => aiRun.id, { onDelete: 'set null' }),
+    contentHash: text('content_hash').notNull(),
+    schemaVersion: integer('schema_version').notNull().default(1),
+    analysis: jsonb('analysis').$type<Record<string, unknown>>().notNull().default({}),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    uniqueIndex('ai_source_analysis_workspace_version_uidx').on(table.workspaceId, table.sourceVersionId),
+    index('ai_source_analysis_workspace_source_idx').on(table.workspaceId, table.sourceId),
+  ],
+);
+
+export const operatorMemoryRevision = pgTable(
+  'operator_memory_revision',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    memoryId: uuid('memory_id').notNull(),
+    aiRunId: uuid('ai_run_id').references(() => aiRun.id, { onDelete: 'set null' }),
+    operation: aiMemoryRevisionOperation('operation').notNull(),
+    beforeState: jsonb('before_state').$type<Record<string, unknown>>().notNull().default({}),
+    afterState: jsonb('after_state').$type<Record<string, unknown>>().notNull().default({}),
+    reason: text('reason').notNull().default(''),
+    sourceReferences: jsonb('source_references').$type<Array<Record<string, unknown>>>().notNull().default([]),
+    revisionNumber: integer('revision_number').notNull().default(1),
+    createdByUserId: text('created_by_user_id').notNull(),
+    ...timestampColumns,
+  },
+  (table) => [
+    index('operator_memory_revision_workspace_memory_idx').on(table.workspaceId, table.memoryId, table.createdAt),
+    index('operator_memory_revision_workspace_run_idx').on(table.workspaceId, table.aiRunId),
+  ],
+);
+
+export const taskDependency = pgTable(
+  'task_dependency',
+  {
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id').notNull(),
+    dependsOnTaskId: uuid('depends_on_task_id').notNull(),
+    createdByUserId: text('created_by_user_id').notNull(),
+    createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workspaceId, table.taskId, table.dependsOnTaskId] }),
+    check('task_dependency_no_self_check', sql`${table.taskId} <> ${table.dependsOnTaskId}`),
+    index('task_dependency_workspace_task_idx').on(table.workspaceId, table.taskId),
   ],
 );
 

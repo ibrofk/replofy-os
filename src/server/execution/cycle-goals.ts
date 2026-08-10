@@ -11,6 +11,9 @@ const goalStatusSchema = z.enum(['active', 'completed', 'archived']);
 const createGoalSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(20_000).default(''),
+  outcome: z.string().trim().max(4_000).default(''),
+  successCriteria: z.array(z.string().trim().min(1).max(1_000)).max(100).default([]),
+  targetDate: z.string().datetime().nullable().optional(),
   status: goalStatusSchema.default('active'),
 });
 
@@ -48,6 +51,9 @@ function asApiCycleGoal(row: typeof cycleGoal.$inferSelect) {
     authorId: row.createdByUserId,
     title: row.title,
     description: row.description,
+    outcome: row.outcome,
+    successCriteria: row.successCriteria,
+    targetDate: row.targetDate?.toISOString() ?? null,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -100,6 +106,7 @@ export async function createCycleGoal(
       workspaceId: actor.workspaceId,
       createdByUserId: actor.userId,
       ...parsed,
+      targetDate: parsed.targetDate ? new Date(parsed.targetDate) : null,
     })
     .returning();
   return asApiCycleGoal(rows[0]);
@@ -113,10 +120,14 @@ export async function updateCycleGoal(
 ) {
   const parsedGoalId = parseOrThrow(z.string().uuid().safeParse(goalId));
   const parsed = parseOrThrow(updateGoalSchema.safeParse(input));
-  const patch = pickProvided(input, parsed);
+  const provided = pickProvided(input, parsed);
+  const { targetDate, ...patch } = provided;
+  const datePatch = targetDate !== undefined
+    ? { targetDate: targetDate ? new Date(targetDate) : null }
+    : {};
   const rows = await database
     .update(cycleGoal)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({ ...patch, ...datePatch, updatedAt: new Date() })
     .where(
       and(eq(cycleGoal.id, parsedGoalId), eq(cycleGoal.workspaceId, actor.workspaceId)),
     )

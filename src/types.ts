@@ -99,6 +99,8 @@ export type Task = {
   companyId?: string;
   cycleGoalId?: string; // If not set, goes to icebox
   executionNotes?: string;
+  acceptanceCriteria?: string[];
+  planOrder?: number | null;
 } & SourceLineage;
 
 export type BugSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -331,6 +333,9 @@ export type CycleGoal = {
   id: string;
   title: string;
   description: string;
+  outcome?: string;
+  successCriteria?: string[];
+  targetDate?: string | null;
   status: 'active' | 'completed' | 'archived';
   createdAt: string;
   authorId: string;
@@ -758,6 +763,11 @@ export type OperatorMemory = {
   usedCount: number;
   source?: string;
   sourceMetadata?: Record<string, unknown>;
+  sourceRunId?: string | null;
+  supersededMemoryId?: string | null;
+  evidenceMetadata?: Record<string, unknown>;
+  revision?: number;
+  archivedAt?: string | null;
   authorId: string;
   companyId?: string;
 };

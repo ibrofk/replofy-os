@@ -21,6 +21,10 @@ const environmentSchema = z.object({
   REPLOFY_S3_CREATE_BUCKET: z.enum(['true', 'false']).default('false'),
   REPLOFY_SECURE_COOKIES: z.enum(['true', 'false']).optional(),
   REPLOFY_INVITATION_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(168),
+  REPLOFY_AI_SECRETS_KEY: z.string().trim().min(16).optional(),
+  REPLOFY_MEMORY_SERVICE_URL: z.string().url().optional(),
+  REPLOFY_MEMORY_SERVICE_TOKEN: z.string().trim().min(16).optional(),
+  REPLOFY_AI_WORKER_ENABLED: z.enum(['true', 'false']).default('true'),
 });
 
 export type ServerConfig = {
@@ -45,6 +49,10 @@ export type ServerConfig = {
   };
   secureCookies: boolean;
   invitationTtlHours: number;
+  aiSecretsKey?: string;
+  memoryServiceUrl?: string;
+  memoryServiceToken?: string;
+  aiWorkerEnabled?: boolean;
 };
 
 export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -66,6 +74,16 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     if (missing.length > 0) {
       throw new Error(`Invalid standalone server configuration: ${missing.join(', ')} required when REPLOFY_ASSET_STORE=s3.`);
     }
+  }
+
+  const serverUrl = new URL(parsed.data.REPLOFY_SERVER_URL);
+  const isLoopbackServer = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(serverUrl.hostname);
+  const secureCookies =
+    parsed.data.REPLOFY_SECURE_COOKIES !== undefined
+      ? parsed.data.REPLOFY_SECURE_COOKIES === 'true'
+      : serverUrl.protocol === 'https:';
+  if (parsed.data.NODE_ENV === 'production' && !isLoopbackServer && (serverUrl.protocol !== 'https:' || !secureCookies)) {
+    throw new Error('Invalid standalone server configuration: production deployments must use an HTTPS URL and secure cookies.');
   }
 
   return {
@@ -93,10 +111,11 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
         createBucket: parsed.data.REPLOFY_S3_CREATE_BUCKET === 'true',
       },
     }),
-    secureCookies:
-      parsed.data.REPLOFY_SECURE_COOKIES !== undefined
-        ? parsed.data.REPLOFY_SECURE_COOKIES === 'true'
-        : parsed.data.REPLOFY_SERVER_URL.startsWith('https://'),
+    secureCookies,
     invitationTtlHours: parsed.data.REPLOFY_INVITATION_TTL_HOURS,
+    aiSecretsKey: parsed.data.REPLOFY_AI_SECRETS_KEY,
+    memoryServiceUrl: parsed.data.REPLOFY_MEMORY_SERVICE_URL,
+    memoryServiceToken: parsed.data.REPLOFY_MEMORY_SERVICE_TOKEN,
+    aiWorkerEnabled: parsed.data.REPLOFY_AI_WORKER_ENABLED === 'true',
   };
 }

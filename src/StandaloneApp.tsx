@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from 'react-router-dom';
-import { LogOut } from 'lucide-react';
+import { LogOut, Settings2 } from 'lucide-react';
 import { GlobalStateProvider } from './contexts/GlobalStateContext';
 import { UserContext } from './contexts/UserContext';
 import { ExecutionStudioPage } from './pages/ExecutionStudioPage';
@@ -16,6 +16,9 @@ import { StandaloneTechnicalPage } from './pages/StandaloneTechnicalPage';
 import { StandaloneSystemsPage } from './pages/StandaloneSystemsPage';
 import { StandalonePlanningPage } from './pages/StandalonePlanningPage';
 import { StandaloneStrategyPage } from './pages/StandaloneStrategyPage';
+import { StandaloneAIPage } from './pages/StandaloneAIPage';
+import { StandaloneAIContextPanel } from './components/ai/StandaloneAIContextPanel';
+import { StandaloneAIStatusLink } from './components/ai/StandaloneAIStatusLink';
 import { localAuthClient } from './services/localAuthClient';
 import {
   StandaloneApiError,
@@ -222,6 +225,20 @@ function StandaloneWorkspaceApp({
                 </span>
               </div>
               <div className="flex items-center gap-3">
+                <StandaloneAIStatusLink key={activeWorkspace.id} />
+                <NavLink
+                  to="/settings"
+                  className={({ isActive }) =>
+                    `inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                      isActive
+                        ? 'border-zinc-950 bg-zinc-950 text-white'
+                        : 'border-zinc-200 bg-white text-zinc-600 hover:border-zinc-400 hover:text-zinc-950'
+                    }`
+                  }
+                >
+                  <Settings2 className="h-4 w-4" />
+                  <span className="hidden sm:inline">Settings</span>
+                </NavLink>
                 {workspaceState.workspaces.length > 1 && (
                   <select
                     value={activeWorkspace.id}
@@ -249,7 +266,7 @@ function StandaloneWorkspaceApp({
             <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-center text-xs text-amber-900">
               Visible standalone modules use PostgreSQL. Unmigrated Firebase modules stay hidden until their platform contracts are ready.
             </div>
-            <nav className="flex shrink-0 items-center gap-1 border-b border-zinc-200 bg-white px-5 py-2">
+            <nav aria-label="Replofy modules" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-200 bg-white px-5 py-2">
               {[
                 { to: '/execution', label: 'Execution' },
                 { to: '/tasks', label: 'Tasks' },
@@ -263,6 +280,8 @@ function StandaloneWorkspaceApp({
                 { to: '/planning', label: 'Plans & Context' },
                 { to: '/strategy', label: 'Strategy' },
                 { to: '/team', label: 'Team' },
+                { to: '/ai', label: 'AI workspace' },
+                { to: '/settings', label: 'Settings' },
               ].map((item) => (
                 <NavLink
                   key={item.to}
@@ -291,9 +310,12 @@ function StandaloneWorkspaceApp({
                 <Route path="/planning" element={<StandalonePlanningPage />} />
                 <Route path="/strategy" element={<StandaloneStrategyPage />} />
                 <Route path="/team" element={<StandaloneTeamPage />} />
+                <Route path="/ai" element={<StandaloneAIPage workspaceId={activeWorkspace.id} />} />
+                <Route path="/settings" element={<StandaloneAIPage workspaceId={activeWorkspace.id} focus="settings" />} />
                 <Route path="*" element={<Navigate to="/execution" replace />} />
               </Routes>
             </main>
+            <StandaloneAIContextPanel key={activeWorkspace.id} />
           </div>
         </BrowserRouter>
       </GlobalStateProvider>

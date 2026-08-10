@@ -21,6 +21,7 @@ Before eventually starting Compose, create an untracked `.env` file:
 ```dotenv
 BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
 REPLOFY_BOOTSTRAP_TOKEN=replace-with-at-least-32-random-characters
+REPLOFY_MEMORY_SERVICE_TOKEN=replace-with-a-private-token
 POSTGRES_PASSWORD=replace-with-a-strong-database-password
 REPLOFY_POSTGRES_DATA=D:/ReplofyData/postgres
 REPLOFY_APP_DATA=D:/ReplofyData/assets
@@ -37,9 +38,10 @@ dependencies, a PostgreSQL service, and the data you create; it does not need
 Docker images or a Docker VM. If both local volumes are nearly full, defer
 Compose installation and use CI or another machine for the service-backed
 checks.
-Set `REPLOFY_SECURE_COOKIES=true` when the public
-`REPLOFY_SERVER_URL` uses HTTPS. The default local HTTP stack leaves it false
-so Better Auth can establish a session on `localhost`.
+The local HTTP stack leaves `REPLOFY_SECURE_COOKIES=false` so Better Auth can
+establish a session on `localhost`. Production rejects public HTTP URLs and
+requires HTTPS with secure cookies; set `REPLOFY_SERVER_URL` to the external
+HTTPS origin before exposing the service.
 
 Owners and admins can create time-limited invitation links from the Team
 screen. Only owners can grant the admin role. The server stores a SHA-256
@@ -105,7 +107,7 @@ supports an S3-compatible endpoint such as MinIO without Cloudinary:
 REPLOFY_ASSET_STORE=s3
 REPLOFY_S3_ENDPOINT=http://minio:9000
 REPLOFY_S3_BUCKET=replofy-assets
-REPLOFY_S3_ACCESS_KEY_ID=replofy-local
+REPLOFY_S3_ACCESS_KEY_ID=replace-with-a-unique-access-key
 REPLOFY_S3_SECRET_ACCESS_KEY=replace-with-a-long-secret
 REPLOFY_S3_REGION=us-east-1
 REPLOFY_S3_FORCE_PATH_STYLE=true
@@ -146,6 +148,39 @@ injections, and approval decisions are also durable. Approved writes are
 transactional for the migrated Tasks, Blog Articles, Team Chat, and Operator
 Memory destinations. Unsupported destinations remain visible as routing
 warnings and cannot be approved into a partial write.
+
+## Configure the AI context engine
+
+AI is a workspace capability, not a server-wide capability. Open the `AI`
+surface after bootstrap and save both:
+
+1. A provider API key for OpenAI API, Gemini, or Claude.
+2. An explicit default model.
+
+The key is encrypted at rest with `REPLOFY_AI_SECRETS_KEY` (or a derivation of
+`BETTER_AUTH_SECRET` when the explicit key is empty). A server-level
+`GEMINI_API_KEY` only preserves the legacy deterministic context-extraction
+compatibility path; it never activates the workspace AI engine.
+
+While either workspace setting is missing, the engine makes no provider calls,
+does not retrieve or write AI memory, and blocks queued AI jobs. Existing
+memories and history remain available for audit. Once active, the engine is
+available from `/settings` for provider/model setup and testing, `/ai` for chat,
+source analysis, proposals, memory history, and run diagnostics, the persistent
+contextual panel on every standalone surface, and the planning “Analyze with
+AI” action.
+
+Domain record changes become generic proposals and are applied through native
+Replofy services only after approval. Workspace memory is the deliberate
+autonomous exception: it can be created, updated, merged, expired, archived,
+and undone. Every memory mutation writes an `operator_memory_revision` row.
+
+The optional Cognee sidecar is private and rebuildable. Compose stores its
+state at `REPLOFY_MEMORY_DATA` (default `D:/ReplofyData/memory` on Windows),
+keeps it on the internal Docker network, and never sends provider credentials
+to it. PostgreSQL remains canonical; the sidecar is repopulated through the
+workspace-scoped projection API. Set `REPLOFY_AI_WORKER_ENABLED=false` when a
+deployment should not run the PostgreSQL-backed AI worker.
 
 The standalone operator model is the canonical replacement for the hosted
 Firebase `agenticTasks` and `osOperators` collections. Those legacy records are

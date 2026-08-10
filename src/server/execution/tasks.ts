@@ -30,6 +30,8 @@ const createTaskSchema = z.object({
   assigneeId: nullableUuid.optional(),
   completedAt: z.string().datetime().nullable().optional(),
   executionNotes: z.string().max(20_000).default(''),
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(1_000)).max(100).default([]),
+  planOrder: z.number().int().nullable().optional(),
 });
 
 const updateTaskSchema = createTaskSchema
@@ -66,6 +68,8 @@ function asApiTask(row: typeof task.$inferSelect) {
     assigneeId: row.assigneeUserId,
     completedAt: row.completedAt?.toISOString() ?? null,
     executionNotes: row.executionNotes,
+    acceptanceCriteria: row.acceptanceCriteria,
+    planOrder: row.planOrder,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     ...sourceLineage,
@@ -143,6 +147,8 @@ export async function createTask(
         assigneeUserId: parsed.assigneeId ?? null,
         completedAt,
         executionNotes: parsed.executionNotes,
+        acceptanceCriteria: parsed.acceptanceCriteria,
+        planOrder: parsed.planOrder ?? null,
       })
       .returning();
     return asApiTask(rows[0]);
@@ -177,6 +183,8 @@ export async function updateTask(
   if (provided.cycleGoalId !== undefined) patch.cycleGoalId = provided.cycleGoalId;
   if (provided.assigneeId !== undefined) patch.assigneeUserId = provided.assigneeId;
   if (provided.executionNotes !== undefined) patch.executionNotes = provided.executionNotes;
+  if (provided.acceptanceCriteria !== undefined) patch.acceptanceCriteria = provided.acceptanceCriteria;
+  if (provided.planOrder !== undefined) patch.planOrder = provided.planOrder;
 
   if (provided.status !== undefined) {
     patch.status = provided.status;

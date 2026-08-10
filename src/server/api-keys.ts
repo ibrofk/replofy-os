@@ -26,6 +26,10 @@ export const standaloneApiKeyScopes = [
   'technical:write',
   'systems:read',
   'systems:write',
+  'ai:read',
+  'ai:write',
+  'ai:approve',
+  'ai:admin',
 ] as const;
 export type StandaloneApiKeyScope = typeof standaloneApiKeyScopes[number];
 
@@ -49,6 +53,15 @@ function keyHash(value: string) {
 function assertCanManage(actor: WorkspaceActor) {
   if (actor.role === 'member') {
     throw new StandaloneApiKeyError('Admin access is required.', 403);
+  }
+}
+
+export function assertStandaloneScopeForSession(
+  actor: WorkspaceActor,
+  requiredScope: StandaloneApiKeyScope,
+) {
+  if ((requiredScope === 'ai:approve' || requiredScope === 'ai:admin') && actor.role === 'member') {
+    throw new StandaloneApiKeyError('Workspace admin access is required.', 403);
   }
 }
 

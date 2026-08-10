@@ -1,6 +1,7 @@
 import express, { type ErrorRequestHandler } from 'express';
 import path from 'node:path';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { ZodError } from 'zod';
 import type { ServerConfig } from './config.js';
 import { BootstrapError, bootstrapInstance, needsBootstrap } from './bootstrap.js';
 import { WorkspaceError } from './workspaces.js';
@@ -53,6 +54,7 @@ import {
   revokeStandaloneApiKey,
   StandaloneApiKeyError,
   type StandaloneApiKeyScope,
+  assertStandaloneScopeForSession,
 } from './api-keys.js';
 import {
   addTeamChatParticipantToChannel,
@@ -252,7 +254,14 @@ import {
   StrategyError,
 } from './strategy.js';
 import { OPERATOR_MCP_REGISTRY_ACTIONS } from '../utils/operatorDeskTemplates.js';
-import { workspace } from './db/schema.js';
+import { contextSourceVersion, workspace } from './db/schema.js';
+import { registerAIRoutes } from './ai/routes.js';
+import { AIEngineError } from './ai/engine.js';
+import { AISettingsError } from './ai/settings.js';
+import { AIMemoryError } from './ai/memory.js';
+import { AIProposalError } from './ai/proposals.js';
+import { AIProviderGatewayError } from './ai/provider-gateway.js';
+import { enqueueAIJob } from './ai/jobs.js';
 
 export type ServerDependencies = {
   config: ServerConfig;
@@ -290,7 +299,7 @@ export function createServerApp({
   });
 
   app.all('/api/auth/*', authProvider.handler);
-  app.use(express.json({ limit: '12mb' }));
+  app.use(express.json({ limit: '64mb' }));
 
   app.get('/api/setup/status', async (_request, response, next) => {
     try {
@@ -397,13 +406,12 @@ export function createServerApp({
   ) {
     const current = await authProvider.getSession(request);
     if (current) {
-      // Browser sessions are bounded by active workspace membership. API-key
-      // scopes apply only to bearer-key callers; admin-only services enforce
-      // the session actor's workspace role separately.
-      return workspaceRepository.resolveWorkspaceActor(
+      const actor = await workspaceRepository.resolveWorkspaceActor(
         current.user.id,
         current.session.activeWorkspaceId,
       );
+      assertStandaloneScopeForSession(actor, requiredScope);
+      return actor;
     }
     const authorization = request.header('authorization');
     const rawKey = request.header('x-api-key')
@@ -411,6 +419,12 @@ export function createServerApp({
     if (!rawKey) throw new StandaloneApiKeyError('Authentication required.', 401);
     return authorizeStandaloneApiKey(database, rawKey, requiredScope);
   }
+
+  registerAIRoutes(app, {
+    database,
+    config,
+    getActor: getWorkspaceActor,
+  });
 
   app.get('/api/v1', async (request, response, next) => {
     try {
@@ -456,6 +470,7 @@ export function createServerApp({
           'operator-injections',
           'operator-approvals',
           'operator-memories',
+          'ai',
           'mcp-registry',
           'weekly-changelog',
         ],
@@ -904,7 +919,18 @@ export function createServerApp({
   });
   app.delete('/api/v1/context-sources/:sourceId', async (request, response, next) => {
     try {
-      response.status(200).json(await deleteContextSource(database, await getWorkspaceActor(request, 'systems:write'), request.params.sourceId));
+      const actor = await getWorkspaceActor(request, 'systems:write');
+      const versions = await database.select({ id: contextSourceVersion.id }).from(contextSourceVersion).where(and(
+        eq(contextSourceVersion.workspaceId, actor.workspaceId),
+        eq(contextSourceVersion.sourceId, request.params.sourceId),
+      ));
+      const result = await deleteContextSource(database, actor, request.params.sourceId);
+      for (const version of versions) {
+        await enqueueAIJob(database, actor, 'delete_source_projection', { sourceVersionId: version.id }, {
+          idempotencyKey: `delete-source:${version.id}`,
+        });
+      }
+      response.status(200).json(result);
     } catch (error) {
       next(error);
     }
@@ -936,7 +962,12 @@ export function createServerApp({
   });
   app.delete('/api/v1/context-source-versions/:versionId', async (request, response, next) => {
     try {
-      response.status(200).json(await deleteContextSourceVersion(database, await getWorkspaceActor(request, 'systems:write'), request.params.versionId));
+      const actor = await getWorkspaceActor(request, 'systems:write');
+      const result = await deleteContextSourceVersion(database, actor, request.params.versionId);
+      await enqueueAIJob(database, actor, 'delete_source_projection', { sourceVersionId: result.id }, {
+        idempotencyKey: `delete-source:${result.id}`,
+      });
+      response.status(200).json(result);
     } catch (error) {
       next(error);
     }
@@ -1018,12 +1049,17 @@ export function createServerApp({
   });
   app.post('/api/v1/context-ingestions', async (request, response, next) => {
     try {
-      response.status(201).json(await ingestContext(
+      const actor = await getWorkspaceActor(request, 'systems:write');
+      const result = await ingestContext(
         database,
-        await getWorkspaceActor(request, 'systems:write'),
+        actor,
         request.body,
         aiProvider,
-      ));
+      );
+      await enqueueAIJob(database, actor, 'index_context', { sourceVersionId: result.result.sourceVersionId }, {
+        idempotencyKey: `index-context:${result.result.sourceVersionId}`,
+      });
+      response.status(201).json(result);
     } catch (error) {
       next(error);
     }
@@ -2477,6 +2513,14 @@ export function createServerApp({
   }
 
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
+    if (error && typeof error === 'object' && 'type' in error && error.type === 'entity.parse.failed') {
+      response.status(400).json({ error: 'Malformed JSON request body.' });
+      return;
+    }
+    if (error instanceof ZodError) {
+      response.status(400).json({ error: error.issues[0]?.message || 'Invalid request.' });
+      return;
+    }
     if (
       error instanceof BootstrapError ||
       error instanceof WorkspaceError ||
@@ -2498,6 +2542,11 @@ export function createServerApp({
       || error instanceof StrategyError
       || error instanceof FocusStackError
       || error instanceof ReportError
+      || error instanceof AIEngineError
+      || error instanceof AIProviderGatewayError
+      || error instanceof AISettingsError
+      || error instanceof AIMemoryError
+      || error instanceof AIProposalError
     ) {
       response.status(error.statusCode).json({ error: error.message });
       return;
