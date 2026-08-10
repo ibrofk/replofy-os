@@ -358,7 +358,7 @@ jobs:
           docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$prior_database"
           pg_restore --dbname="$prior_url" --no-owner --no-privileges --exit-on-error --single-transaction "$prior_dump"
           rollback_latest="$(psql "$prior_url" --tuples-only --no-align \
-            --command="SELECT (to_regclass('public.ai_agent_profile_workspace_id_id_uidx') IS NULL)::text;")"
+            --command="SELECT (count(*) = $prior_entry_count)::text FROM drizzle.__drizzle_migrations;")"
           echo "rollback_latest=$rollback_latest"
           test "$rollback_latest" = 'true'
           rollback_workspace="$(psql "$prior_url" --tuples-only --no-align \
