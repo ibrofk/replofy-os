@@ -4,6 +4,7 @@ import { postgresErrorCode } from './db/errors.js';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { operatorCheckin, operatorDesk, operatorWorkOrder } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
+import { pickProvided } from './validation.js';
 
 const deskTypes = ['ops', 'content', 'creative', 'bug', 'feature', 'research', 'growth', 'feedback'] as const;
 const frequencies = ['manual', 'daily', 'weekly', 'monthly', 'event'] as const;
@@ -220,21 +221,22 @@ export async function updateOperatorDesk(
 ) {
   const id = parse(z.string().uuid(), deskId);
   const data = parse(deskUpdateSchema, input);
+  const patch = pickProvided(input, data);
   const current = await database
     .select()
     .from(operatorDesk)
     .where(and(eq(operatorDesk.id, id), eq(operatorDesk.workspaceId, actor.workspaceId)))
     .limit(1);
   if (!current[0]) throw new OperatorError('Operator Desk not found.', 404);
-  if (current[0].status === 'archived' && data.status !== 'active') {
+  if (current[0].status === 'archived' && patch.status !== 'active') {
     throw new OperatorError('Archived Operator Desks must be restored before other edits.', 409);
   }
   const rows = await database
     .update(operatorDesk)
     .set({
-      ...data,
-      ...(data.allowedOutputTypes && data.routingRules === undefined && {
-        routingRules: routingRules(data.allowedOutputTypes),
+      ...patch,
+      ...(patch.allowedOutputTypes && patch.routingRules === undefined && {
+        routingRules: routingRules(patch.allowedOutputTypes),
       }),
       updatedAt: new Date(),
     })
@@ -356,19 +358,34 @@ export async function updateOperatorWorkOrder(
 ) {
   const id = parse(z.string().uuid(), workOrderId);
   const data = parse(orderUpdateSchema, input);
+  const patch = pickProvided(input, data);
   const rows = await database
     .update(operatorWorkOrder)
     .set({
-      ...data,
-      ...(data.availableFrom !== undefined && { availableFrom: date(data.availableFrom) }),
-      ...(data.dueAt !== undefined && { dueAt: date(data.dueAt) }),
-      ...(data.claimedAt !== undefined && { claimedAt: date(data.claimedAt) }),
+      ...patch,
+      ...(patch.availableFrom !== undefined && { availableFrom: date(patch.availableFrom) }),
+      ...(patch.dueAt !== undefined && { dueAt: date(patch.dueAt) }),
+      ...(patch.claimedAt !== undefined && { claimedAt: date(patch.claimedAt) }),
       updatedAt: new Date(),
     })
     .where(and(eq(operatorWorkOrder.id, id), eq(operatorWorkOrder.workspaceId, actor.workspaceId)))
     .returning();
   if (!rows[0]) throw new OperatorError('Work order not found.', 404);
   return serializeOrder(rows[0]);
+}
+
+export async function deleteOperatorWorkOrder(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  workOrderId: string,
+) {
+  const id = parse(z.string().uuid(), workOrderId);
+  const rows = await database
+    .delete(operatorWorkOrder)
+    .where(and(eq(operatorWorkOrder.id, id), eq(operatorWorkOrder.workspaceId, actor.workspaceId)))
+    .returning({ id: operatorWorkOrder.id });
+  if (!rows[0]) throw new OperatorError('Work order not found.', 404);
+  return { id: rows[0].id, deleted: true as const };
 }
 
 export async function claimOperatorWorkOrder(

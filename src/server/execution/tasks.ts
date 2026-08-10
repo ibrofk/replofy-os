@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { WorkspaceRepository as PostgresDatabase } from '../platform/workspace-repository.js';
 import { postgresErrorCode } from '../db/errors.js';
 import { task } from '../db/schema.js';
+import { pickProvided } from '../validation.js';
 
 export type WorkspaceActor = {
   userId: string;
@@ -167,27 +168,28 @@ export async function updateTask(
     .where(and(eq(task.id, parsedTaskId), eq(task.workspaceId, actor.workspaceId)))
     .limit(1);
   if (existing.length === 0) throw new TaskError('Task not found.', 404);
+  const provided = pickProvided(input, parsed);
 
   const patch: Partial<typeof task.$inferInsert> = { updatedAt: new Date() };
-  if (parsed.title !== undefined) patch.title = parsed.title;
-  if (parsed.effortPoints !== undefined) patch.effortPoints = parsed.effortPoints;
-  if (parsed.isLeadIndicator !== undefined) patch.isLeadIndicator = parsed.isLeadIndicator;
-  if (parsed.cycleGoalId !== undefined) patch.cycleGoalId = parsed.cycleGoalId;
-  if (parsed.assigneeId !== undefined) patch.assigneeUserId = parsed.assigneeId;
-  if (parsed.executionNotes !== undefined) patch.executionNotes = parsed.executionNotes;
+  if (provided.title !== undefined) patch.title = provided.title;
+  if (provided.effortPoints !== undefined) patch.effortPoints = provided.effortPoints;
+  if (provided.isLeadIndicator !== undefined) patch.isLeadIndicator = provided.isLeadIndicator;
+  if (provided.cycleGoalId !== undefined) patch.cycleGoalId = provided.cycleGoalId;
+  if (provided.assigneeId !== undefined) patch.assigneeUserId = provided.assigneeId;
+  if (provided.executionNotes !== undefined) patch.executionNotes = provided.executionNotes;
 
-  if (parsed.status !== undefined) {
-    patch.status = parsed.status;
+  if (provided.status !== undefined) {
+    patch.status = provided.status;
     patch.completedAt =
-      parsed.completedAt === null
+      provided.completedAt === null
         ? null
-        : parsed.completedAt
-          ? new Date(parsed.completedAt)
-          : parsed.status === 'done'
+        : provided.completedAt
+          ? new Date(provided.completedAt)
+          : provided.status === 'done'
             ? existing[0].completedAt ?? new Date()
             : null;
-  } else if (parsed.completedAt !== undefined) {
-    patch.completedAt = parsed.completedAt === null ? null : new Date(parsed.completedAt);
+  } else if (provided.completedAt !== undefined) {
+    patch.completedAt = provided.completedAt === null ? null : new Date(provided.completedAt);
   }
 
   try {

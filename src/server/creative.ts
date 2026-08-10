@@ -6,6 +6,7 @@ import type { WorkspaceRepository as PostgresDatabase } from './platform/workspa
 import { creativeAsset, creativeItem, workspaceMembership } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
 import type { AssetStore, AssetStoreProvider, StoredAsset } from './platform/asset-store.js';
+import { pickProvided } from './validation.js';
 
 const platforms = ['Instagram', 'LinkedIn', 'X', 'TikTok', 'YouTube', 'Blog', 'Email', 'Other'] as const;
 const formats = ['single-post', 'carousel', 'reel', 'story-sequence', 'motion-brief', 'static-ad', 'thread', 'other'] as const;
@@ -227,33 +228,34 @@ export async function createCreativeItem(database: PostgresDatabase, actor: Work
 export async function updateCreativeItem(database: PostgresDatabase, actor: WorkspaceActor, itemId: string, input: unknown) {
   const id = parse(z.string().uuid(), itemId);
   const data = parse(itemUpdateSchema, input);
+  const patch = pickProvided(input, data);
   await Promise.all([
-    assertWorkspaceUser(database, actor, data.ownerId),
-    assertWorkspaceUser(database, actor, data.approverId),
+    assertWorkspaceUser(database, actor, patch.ownerId),
+    assertWorkspaceUser(database, actor, patch.approverId),
   ]);
   const rows = await database.update(creativeItem).set({
-    ...(data.title !== undefined && { title: data.title }),
-    ...(data.platform !== undefined && { platform: data.platform }),
-    ...(data.format !== undefined && { format: data.format }),
-    ...(data.campaign !== undefined && { campaign: data.campaign }),
-    ...(data.audience !== undefined && { audience: data.audience }),
-    ...(data.objective !== undefined && { objective: data.objective }),
-    ...(data.hook !== undefined && { hook: data.hook }),
-    ...(data.brief !== undefined && { brief: data.brief }),
-    ...(data.caption !== undefined && { caption: data.caption }),
-    ...(data.visualDirection !== undefined && { visualDirection: data.visualDirection }),
-    ...(data.productionNotes !== undefined && { productionNotes: data.productionNotes }),
-    ...(data.cta !== undefined && { cta: data.cta }),
-    ...(data.status !== undefined && { status: data.status }),
-    ...(data.ownerId !== undefined && { ownerUserId: data.ownerId }),
-    ...(data.approverId !== undefined && { approverUserId: data.approverId }),
-    ...(data.targetPublishAt !== undefined && { targetPublishAt: date(data.targetPublishAt) }),
-    ...(data.scheduledFor !== undefined && { scheduledFor: date(data.scheduledFor) }),
-    ...(data.publishedAt !== undefined && { publishedAt: date(data.publishedAt) }),
-    ...(data.submittedAt !== undefined && { submittedAt: date(data.submittedAt) }),
-    ...(data.approvalNotes !== undefined && { approvalNotes: data.approvalNotes }),
-    ...(data.tags !== undefined && { tags: [...new Set(data.tags)] }),
-    ...(data.sourceLineage !== undefined && { sourceLineage: data.sourceLineage }),
+    ...(patch.title !== undefined && { title: patch.title }),
+    ...(patch.platform !== undefined && { platform: patch.platform }),
+    ...(patch.format !== undefined && { format: patch.format }),
+    ...(patch.campaign !== undefined && { campaign: patch.campaign }),
+    ...(patch.audience !== undefined && { audience: patch.audience }),
+    ...(patch.objective !== undefined && { objective: patch.objective }),
+    ...(patch.hook !== undefined && { hook: patch.hook }),
+    ...(patch.brief !== undefined && { brief: patch.brief }),
+    ...(patch.caption !== undefined && { caption: patch.caption }),
+    ...(patch.visualDirection !== undefined && { visualDirection: patch.visualDirection }),
+    ...(patch.productionNotes !== undefined && { productionNotes: patch.productionNotes }),
+    ...(patch.cta !== undefined && { cta: patch.cta }),
+    ...(patch.status !== undefined && { status: patch.status }),
+    ...(patch.ownerId !== undefined && { ownerUserId: patch.ownerId }),
+    ...(patch.approverId !== undefined && { approverUserId: patch.approverId }),
+    ...(patch.targetPublishAt !== undefined && { targetPublishAt: date(patch.targetPublishAt) }),
+    ...(patch.scheduledFor !== undefined && { scheduledFor: date(patch.scheduledFor) }),
+    ...(patch.publishedAt !== undefined && { publishedAt: date(patch.publishedAt) }),
+    ...(patch.submittedAt !== undefined && { submittedAt: date(patch.submittedAt) }),
+    ...(patch.approvalNotes !== undefined && { approvalNotes: patch.approvalNotes }),
+    ...(patch.tags !== undefined && { tags: [...new Set(patch.tags)] }),
+    ...(patch.sourceLineage !== undefined && { sourceLineage: patch.sourceLineage }),
     updatedAt: new Date(),
   }).where(and(eq(creativeItem.workspaceId, actor.workspaceId), eq(creativeItem.id, id))).returning();
   if (!rows[0]) throw new CreativeError('Creative item not found.', 404);

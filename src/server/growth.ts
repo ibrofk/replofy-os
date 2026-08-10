@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { WorkspaceRepository as PostgresDatabase } from './platform/workspace-repository.js';
 import { growthAccount, lead, task, workspaceMembership } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
+import { pickProvided } from './validation.js';
 
 const accountStatuses = ['prospect', 'customer', 'partner', 'inactive'] as const;
 const leadStages = ['new', 'qualified', 'contacted', 'demo-booked', 'proposal', 'won', 'lost'] as const;
@@ -170,7 +171,8 @@ export async function createAccount(database: PostgresDatabase, actor: Workspace
 export async function updateAccount(database: PostgresDatabase, actor: WorkspaceActor, accountId: string, input: unknown) {
   const id = parse(z.string().uuid(), accountId);
   const data = parse(accountUpdateSchema, input);
-  const rows = await database.update(growthAccount).set({ ...data, updatedAt: new Date() }).where(and(
+  const patch = pickProvided(input, data);
+  const rows = await database.update(growthAccount).set({ ...patch, updatedAt: new Date() }).where(and(
     eq(growthAccount.workspaceId, actor.workspaceId), eq(growthAccount.id, id),
   )).returning();
   if (!rows[0]) throw new GrowthError('Account not found.', 404);
@@ -245,25 +247,26 @@ export async function createLead(database: PostgresDatabase, actor: WorkspaceAct
 export async function updateLead(database: PostgresDatabase, actor: WorkspaceActor, leadId: string, input: unknown) {
   const id = parse(z.string().uuid(), leadId);
   const data = parse(leadUpdateSchema, input);
-  const linkedTaskIds = data.linkedTaskIds !== undefined
-    ? await assertTasks(database, actor, data.linkedTaskIds)
+  const patch = pickProvided(input, data);
+  const linkedTaskIds = patch.linkedTaskIds !== undefined
+    ? await assertTasks(database, actor, patch.linkedTaskIds)
     : undefined;
   await Promise.all([
-    assertAccount(database, actor, data.accountId),
-    assertOwner(database, actor, data.ownerId),
+    assertAccount(database, actor, patch.accountId),
+    assertOwner(database, actor, patch.ownerId),
   ]);
   const rows = await database.update(lead).set({
-    ...(data.name !== undefined && { name: data.name }),
-    ...(data.email !== undefined && { email: data.email }),
-    ...(data.companyName !== undefined && { companyName: data.companyName }),
-    ...(data.accountId !== undefined && { accountId: data.accountId }),
-    ...(data.source !== undefined && { source: data.source }),
-    ...(data.stage !== undefined && { stage: data.stage }),
-    ...(data.priority !== undefined && { priority: data.priority }),
-    ...(data.ownerId !== undefined && { ownerUserId: data.ownerId }),
-    ...(data.nextAction !== undefined && { nextAction: data.nextAction }),
-    ...(data.nextActionAt !== undefined && { nextActionAt: data.nextActionAt ? new Date(data.nextActionAt) : null }),
-    ...(data.notes !== undefined && { notes: data.notes }),
+    ...(patch.name !== undefined && { name: patch.name }),
+    ...(patch.email !== undefined && { email: patch.email }),
+    ...(patch.companyName !== undefined && { companyName: patch.companyName }),
+    ...(patch.accountId !== undefined && { accountId: patch.accountId }),
+    ...(patch.source !== undefined && { source: patch.source }),
+    ...(patch.stage !== undefined && { stage: patch.stage }),
+    ...(patch.priority !== undefined && { priority: patch.priority }),
+    ...(patch.ownerId !== undefined && { ownerUserId: patch.ownerId }),
+    ...(patch.nextAction !== undefined && { nextAction: patch.nextAction }),
+    ...(patch.nextActionAt !== undefined && { nextActionAt: patch.nextActionAt ? new Date(patch.nextActionAt) : null }),
+    ...(patch.notes !== undefined && { notes: patch.notes }),
     ...(linkedTaskIds !== undefined && { linkedTaskIds }),
     ...(data.sourceLineage !== undefined && { sourceLineage: data.sourceLineage }),
     updatedAt: new Date(),

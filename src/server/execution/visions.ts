@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { WorkspaceRepository as PostgresDatabase } from '../platform/workspace-repository.js';
 import { vision } from '../db/schema.js';
 import type { WorkspaceActor } from './tasks.js';
+import { pickProvided } from '../validation.js';
 
 const createVisionSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -105,9 +106,10 @@ export async function updateVision(
 ) {
   const parsedVisionId = parseOrThrow(z.string().uuid().safeParse(visionId));
   const parsed = parseOrThrow(updateVisionSchema.safeParse(input));
+  const patch = pickProvided(input, parsed);
   const rows = await database
     .update(vision)
-    .set({ ...parsed, updatedAt: new Date() })
+    .set({ ...patch, updatedAt: new Date() })
     .where(and(eq(vision.id, parsedVisionId), eq(vision.workspaceId, actor.workspaceId)))
     .returning();
   if (rows.length === 0) throw new VisionError('Vision not found.', 404);

@@ -81,6 +81,13 @@ export default defineConfig(({ mode }) => {
         name: 'replofy-gemini-dev-api',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
+            if (standalonePlatform && req.url?.startsWith('/api/api-keys')) {
+              sendJson(res as ServerResponse, 403, {
+                error: 'api_key_management_disabled',
+                message: 'Legacy Firebase API-key management routes are disabled in standalone mode.',
+              });
+              return;
+            }
             if (
               standalonePlatform &&
               (req.url?.startsWith('/api/auth') ||

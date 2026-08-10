@@ -1,6 +1,6 @@
 import express, { type ErrorRequestHandler } from 'express';
 import path from 'node:path';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { ServerConfig } from './config.js';
 import { BootstrapError, bootstrapInstance, needsBootstrap } from './bootstrap.js';
 import { WorkspaceError } from './workspaces.js';
@@ -32,6 +32,8 @@ import {
   updateVision,
   VisionError,
 } from './execution/visions.js';
+import { createFocusStack, FocusStackError } from './execution/focus-stack.js';
+import { ReportError, buildWeeklyChangelog, startNextCycle } from './execution/reports.js';
 import {
   InMemoryWorkspaceEventBus,
   type WorkspaceEventBus,
@@ -58,7 +60,11 @@ import {
   createTeamChatMessage,
   createTeamChatParticipant,
   deleteTeamChatChannel,
+  deleteTeamChatMessage,
   deleteTeamChatParticipant,
+  getTeamChatChannel,
+  getTeamChatMessage,
+  getTeamChatParticipant,
   listTeamChatChannels,
   listTeamChatMessages,
   listTeamChatParticipants,
@@ -79,6 +85,7 @@ import {
   createOperatorDesk,
   createOperatorWorkOrder,
   deleteOperatorDesk,
+  deleteOperatorWorkOrder,
   getOperatorDesk,
   getOperatorWorkOrder,
   listAvailableOperatorWorkOrders,
@@ -94,11 +101,18 @@ import {
   buildOperatorManifest,
   createOperatorContextPack,
   createOperatorMemory,
+  deleteOperatorCheckin,
+  deleteOperatorContextPack,
+  deleteOperatorMemory,
+  deleteOperatorOutput,
   getOperatorApproval,
+  getOperatorCheckin,
+  getOperatorContextPack,
   getOperatorInjection,
   getOperatorMemory,
   getOperatorOutput,
   listOperatorApprovals,
+  listOperatorCheckins,
   listOperatorContextPacks,
   listOperatorInjections,
   listOperatorMemories,
@@ -154,6 +168,7 @@ import {
   createApiEndpoint,
   createEnvironment,
   deleteApiEndpoint,
+  deleteEnvironment,
   deployEnvironment,
   getApiEndpoint,
   getEnvironment,
@@ -180,15 +195,23 @@ import {
 import {
   ContextError,
   createContextSourceFolder,
+  deleteContextSource,
+  deleteContextSourceFolder,
+  deleteContextSourceItem,
+  deleteContextSourceVersion,
   extractContextPayload,
+  getContextSourceFolder,
+  getContextSourceItem,
   getContextSource,
   getContextSourceVersion,
   ingestContext,
   listContextSourceFolders,
+  listAllContextSourceVersions,
   listContextSourceItems,
   listContextSources,
   listContextSourceVersions,
   updateContextSource,
+  updateContextSourceFolder,
   updateContextSourceItem,
 } from './context.js';
 import {
@@ -229,6 +252,7 @@ import {
   StrategyError,
 } from './strategy.js';
 import { OPERATOR_MCP_REGISTRY_ACTIONS } from '../utils/operatorDeskTemplates.js';
+import { workspace } from './db/schema.js';
 
 export type ServerDependencies = {
   config: ServerConfig;
@@ -361,6 +385,12 @@ export function createServerApp({
     );
   }
 
+  function assertApiKeyManagementIsUiOnly(request: express.Request) {
+    if (request.header('x-api-key') || request.header('authorization')?.match(/^Bearer\s+/i)) {
+      throw new StandaloneApiKeyError('API key management is available only from the authenticated settings UI.', 403);
+    }
+  }
+
   async function getWorkspaceActor(
     request: express.Request,
     requiredScope: StandaloneApiKeyScope,
@@ -427,11 +457,17 @@ export function createServerApp({
           'operator-approvals',
           'operator-memories',
           'mcp-registry',
+          'weekly-changelog',
         ],
         capabilities: {
           authentication: ['session', 'api-key'],
           realtime: 'server-sent-events',
           unsupportedResourcesReturn: 404,
+          actions: {
+            createFocusStack: '/api/v1/focus-stacks',
+            startNextCycle: '/api/v1/cycles/start-next',
+            weeklyChangelog: '/api/v1/reports/changelog?week=current|last',
+          },
         },
       });
     } catch (error) {
@@ -723,6 +759,17 @@ export function createServerApp({
       next(error);
     }
   });
+  app.delete('/api/v1/environments/:environmentId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteEnvironment(
+        database,
+        await getWorkspaceActor(request, 'systems:write'),
+        request.params.environmentId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post('/api/v1/environments/:environmentId/deploy', async (request, response, next) => {
     try {
       response.status(200).json(
@@ -855,6 +902,13 @@ export function createServerApp({
       next(error);
     }
   });
+  app.delete('/api/v1/context-sources/:sourceId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteContextSource(database, await getWorkspaceActor(request, 'systems:write'), request.params.sourceId));
+    } catch (error) {
+      next(error);
+    }
+  });
   app.get('/api/v1/context-sources/:sourceId/versions', async (request, response, next) => {
     try {
       response.status(200).json({
@@ -864,9 +918,25 @@ export function createServerApp({
       next(error);
     }
   });
+  app.get('/api/v1/context-source-versions', async (request, response, next) => {
+    try {
+      response.status(200).json({
+        data: await listAllContextSourceVersions(database, await getWorkspaceActor(request, 'systems:read'), request.query),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
   app.get('/api/v1/context-source-versions/:versionId', async (request, response, next) => {
     try {
       response.status(200).json(await getContextSourceVersion(database, await getWorkspaceActor(request, 'systems:read'), request.params.versionId));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.delete('/api/v1/context-source-versions/:versionId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteContextSourceVersion(database, await getWorkspaceActor(request, 'systems:write'), request.params.versionId));
     } catch (error) {
       next(error);
     }
@@ -880,9 +950,23 @@ export function createServerApp({
       next(error);
     }
   });
+  app.get('/api/v1/context-source-items/:itemId', async (request, response, next) => {
+    try {
+      response.status(200).json(await getContextSourceItem(database, await getWorkspaceActor(request, 'systems:read'), request.params.itemId));
+    } catch (error) {
+      next(error);
+    }
+  });
   app.patch('/api/v1/context-source-items/:itemId', async (request, response, next) => {
     try {
       response.status(200).json(await updateContextSourceItem(database, await getWorkspaceActor(request, 'systems:write'), request.params.itemId, request.body));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.delete('/api/v1/context-source-items/:itemId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteContextSourceItem(database, await getWorkspaceActor(request, 'systems:write'), request.params.itemId));
     } catch (error) {
       next(error);
     }
@@ -899,6 +983,27 @@ export function createServerApp({
   app.post('/api/v1/context-source-folders', async (request, response, next) => {
     try {
       response.status(201).json(await createContextSourceFolder(database, await getWorkspaceActor(request, 'systems:write'), request.body));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/v1/context-source-folders/:folderId', async (request, response, next) => {
+    try {
+      response.status(200).json(await getContextSourceFolder(database, await getWorkspaceActor(request, 'systems:read'), request.params.folderId));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.patch('/api/v1/context-source-folders/:folderId', async (request, response, next) => {
+    try {
+      response.status(200).json(await updateContextSourceFolder(database, await getWorkspaceActor(request, 'systems:write'), request.params.folderId, request.body));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.delete('/api/v1/context-source-folders/:folderId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteContextSourceFolder(database, await getWorkspaceActor(request, 'systems:write'), request.params.folderId));
     } catch (error) {
       next(error);
     }
@@ -1201,10 +1306,45 @@ export function createServerApp({
     }
   });
 
+  // Compatibility aliases used by the generic MCP resource surface.
+  app.get('/api/v1/users', async (request, response, next) => {
+    try {
+      response.status(200).json({
+        data: await listWorkspaceMembers(database, await getWorkspaceActor(request, 'members:read')),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/v1/companies', async (request, response, next) => {
+    try {
+      const actor = await getWorkspaceActor(request, 'workspace:read');
+      const rows = await database.select({
+        id: workspace.id,
+        name: workspace.name,
+        slug: workspace.slug,
+        createdAt: workspace.createdAt,
+        updatedAt: workspace.updatedAt,
+      }).from(workspace).where(eq(workspace.id, actor.workspaceId)).limit(1);
+      response.status(200).json({
+        data: rows.map((row) => ({
+          ...row,
+          ownerId: actor.userId,
+          companyId: row.id,
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/v1/invitations', async (request, response, next) => {
     try {
       response.status(200).json({
-        data: await listWorkspaceInvitations(database, await getSessionWorkspaceActor(request)),
+        data: await listWorkspaceInvitations(database, await getWorkspaceActor(request, 'members:read')),
       });
     } catch (error) {
       next(error);
@@ -1217,7 +1357,7 @@ export function createServerApp({
         await createWorkspaceInvitation(
           database,
           config,
-          await getSessionWorkspaceActor(request),
+          await getWorkspaceActor(request, 'workspace:write'),
           request.body,
         ),
       );
@@ -1235,6 +1375,17 @@ export function createServerApp({
           request.query,
         ),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/v1/team-chat-channels/:channelId', async (request, response, next) => {
+    try {
+      response.status(200).json(await getTeamChatChannel(
+        database,
+        await getWorkspaceActor(request, 'chat:read'),
+        request.params.channelId,
+      ));
     } catch (error) {
       next(error);
     }
@@ -1319,7 +1470,7 @@ export function createServerApp({
     }
   });
 
-  app.get('/api/v1/operator-work-orders', async (request, response, next) => {
+  app.get(['/api/v1/operator-work-orders', '/api/v1/work-orders'], async (request, response, next) => {
     try {
       response.status(200).json({
         data: await listOperatorWorkOrders(
@@ -1352,6 +1503,28 @@ export function createServerApp({
         database,
         await getWorkspaceActor(request, 'operators:write'),
         request.body,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/v1/operator-context-packs/:contextPackId', async (request, response, next) => {
+    try {
+      response.status(200).json(await getOperatorContextPack(
+        database,
+        await getWorkspaceActor(request, 'operators:read'),
+        request.params.contextPackId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.delete('/api/v1/operator-context-packs/:contextPackId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteOperatorContextPack(
+        database,
+        await getWorkspaceActor(request, 'operators:write'),
+        request.params.contextPackId,
       ));
     } catch (error) {
       next(error);
@@ -1410,6 +1583,17 @@ export function createServerApp({
       next(error);
     }
   });
+  app.delete('/api/v1/operator-memories/:memoryId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteOperatorMemory(
+        database,
+        await getWorkspaceActor(request, 'operators:write'),
+        request.params.memoryId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
 
   for (const action of ['approve', 'reject', 'archive', 'restore'] as const) {
     app.post(`/api/v1/operator-memories/:memoryId/${action}`, async (request, response, next) => {
@@ -1426,12 +1610,47 @@ export function createServerApp({
     });
   }
 
+  app.get('/api/v1/operator-checkins', async (request, response, next) => {
+    try {
+      response.status(200).json({
+        data: await listOperatorCheckins(
+          database,
+          await getWorkspaceActor(request, 'operators:read'),
+          request.query,
+        ),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/v1/operator-checkins/:checkinId', async (request, response, next) => {
+    try {
+      response.status(200).json(await getOperatorCheckin(
+        database,
+        await getWorkspaceActor(request, 'operators:read'),
+        request.params.checkinId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
   app.post('/api/v1/operator-checkins', async (request, response, next) => {
     try {
       response.status(201).json(await submitOperatorCheckin(
         database,
         await getWorkspaceActor(request, 'operators:write'),
         request.body,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.delete('/api/v1/operator-checkins/:checkinId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteOperatorCheckin(
+        database,
+        await getWorkspaceActor(request, 'operators:write'),
+        request.params.checkinId,
       ));
     } catch (error) {
       next(error);
@@ -1461,6 +1680,17 @@ export function createServerApp({
           request.params.outputId,
         ),
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.delete('/api/v1/operator-outputs/:outputId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteOperatorOutput(
+        database,
+        await getWorkspaceActor(request, 'operators:write'),
+        request.params.outputId,
+      ));
     } catch (error) {
       next(error);
     }
@@ -1584,7 +1814,7 @@ export function createServerApp({
     }
   });
 
-  app.get('/api/v1/operator-work-orders/:workOrderId', async (request, response, next) => {
+  app.get(['/api/v1/operator-work-orders/:workOrderId', '/api/v1/work-orders/:workOrderId'], async (request, response, next) => {
     try {
       response.status(200).json({
         data: await getOperatorWorkOrder(
@@ -1598,7 +1828,7 @@ export function createServerApp({
     }
   });
 
-  app.post('/api/v1/operator-work-orders', async (request, response, next) => {
+  app.post(['/api/v1/operator-work-orders', '/api/v1/work-orders'], async (request, response, next) => {
     try {
       response.status(201).json(await createOperatorWorkOrder(
         database,
@@ -1610,7 +1840,7 @@ export function createServerApp({
     }
   });
 
-  app.patch('/api/v1/operator-work-orders/:workOrderId', async (request, response, next) => {
+  app.patch(['/api/v1/operator-work-orders/:workOrderId', '/api/v1/work-orders/:workOrderId'], async (request, response, next) => {
     try {
       response.status(200).json(await updateOperatorWorkOrder(
         database,
@@ -1622,8 +1852,19 @@ export function createServerApp({
       next(error);
     }
   });
+  app.delete(['/api/v1/operator-work-orders/:workOrderId', '/api/v1/work-orders/:workOrderId'], async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteOperatorWorkOrder(
+        database,
+        await getWorkspaceActor(request, 'operators:write'),
+        request.params.workOrderId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
 
-  app.post('/api/v1/operator-work-orders/:workOrderId/claim', async (request, response, next) => {
+  app.post(['/api/v1/operator-work-orders/:workOrderId/claim', '/api/v1/work-orders/:workOrderId/claim'], async (request, response, next) => {
     try {
       response.status(200).json(await claimOperatorWorkOrder(
         database,
@@ -1636,7 +1877,7 @@ export function createServerApp({
     }
   });
 
-  app.post('/api/v1/operator-work-orders/:workOrderId/release', async (request, response, next) => {
+  app.post(['/api/v1/operator-work-orders/:workOrderId/release', '/api/v1/work-orders/:workOrderId/release'], async (request, response, next) => {
     try {
       response.status(200).json(await releaseOperatorWorkOrder(
         database,
@@ -1750,6 +1991,17 @@ export function createServerApp({
       next(error);
     }
   });
+  app.get('/api/v1/team-chat-participants/:participantId', async (request, response, next) => {
+    try {
+      response.status(200).json(await getTeamChatParticipant(
+        database,
+        await getWorkspaceActor(request, 'chat:read'),
+        request.params.participantId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.post('/api/v1/team-chat-participants', async (request, response, next) => {
     try {
@@ -1824,6 +2076,17 @@ export function createServerApp({
       next(error);
     }
   });
+  app.get(['/api/v1/team-chat-messages/:messageId', '/api/v1/team-chat/messages/:messageId'], async (request, response, next) => {
+    try {
+      response.status(200).json(await getTeamChatMessage(
+        database,
+        await getWorkspaceActor(request, 'chat:read'),
+        request.params.messageId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.post('/api/v1/team-chat-messages', async (request, response, next) => {
     try {
@@ -1836,9 +2099,21 @@ export function createServerApp({
       next(error);
     }
   });
+  app.delete('/api/v1/team-chat-messages/:messageId', async (request, response, next) => {
+    try {
+      response.status(200).json(await deleteTeamChatMessage(
+        database,
+        await getWorkspaceActor(request, 'chat:write'),
+        request.params.messageId,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.get('/api/v1/api-keys', async (request, response, next) => {
     try {
+      assertApiKeyManagementIsUiOnly(request);
       response.status(200).json({
         data: await listStandaloneApiKeys(database, await getSessionWorkspaceActor(request)),
       });
@@ -1849,6 +2124,7 @@ export function createServerApp({
 
   app.post('/api/v1/api-keys', async (request, response, next) => {
     try {
+      assertApiKeyManagementIsUiOnly(request);
       response.status(201).json(
         await createStandaloneApiKey(
           database,
@@ -1863,6 +2139,7 @@ export function createServerApp({
 
   app.delete('/api/v1/api-keys/:keyId', async (request, response, next) => {
     try {
+      assertApiKeyManagementIsUiOnly(request);
       response.status(200).json(
         await revokeStandaloneApiKey(
           database,
@@ -1945,6 +2222,41 @@ export function createServerApp({
         data: result,
       });
       response.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/v1/focus-stacks', async (request, response, next) => {
+    try {
+      response.status(201).json(await createFocusStack(
+        database,
+        await getWorkspaceActor(request, 'execution:write'),
+        request.body,
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/v1/cycles/start-next', async (request, response, next) => {
+    try {
+      response.status(200).json(await startNextCycle(
+        database,
+        await getWorkspaceActor(request, 'execution:write'),
+      ));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/v1/reports/changelog', async (request, response, next) => {
+    try {
+      response.status(200).json(await buildWeeklyChangelog(
+        database,
+        await getWorkspaceActor(request, 'workspace:read'),
+        request.query.week ?? 'current',
+      ));
     } catch (error) {
       next(error);
     }
@@ -2184,6 +2496,8 @@ export function createServerApp({
       || error instanceof BusinessPlanError
       || error instanceof ContextError
       || error instanceof StrategyError
+      || error instanceof FocusStackError
+      || error instanceof ReportError
     ) {
       response.status(error.statusCode).json({ error: error.message });
       return;

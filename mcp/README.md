@@ -80,12 +80,12 @@ npx @modelcontextprotocol/inspector@latest --server-url http://localhost:4000/mc
 The server talks to the secured Replofy API at `/api/v1` using a Replofy API key.
 
 Included tools:
-- generic CRUD tools for all Replofy resources
+- generic lifecycle tools for supported Replofy resources; `describe_resource` exposes exact operations before a write
 - object reads with deterministic, compact related context
 - bugs and roadmap items are exposed through the same CRUD tools as the rest of the workspace
 - bug records can include `codeLinks` with plain repository or directory/file links; no Git provider auth is required for the link metadata
 - Blogs Hub articles have dedicated local and hosted MCP tools for roadmap phases, briefs, evidence cards, linked source registry ids, and distribution metadata
-- Creative Hub items are exposed through CRUD and live context; creative assets are exposed as read-only metadata
+- Creative Hub items are exposed through CRUD and live context; creative assets expose metadata updates and authenticated downloads
 - the local FastMCP server exposes the checked-in Replofy OS skill registry through `replofy://skills/registry` and `replofy://skills/{skill_name}`
 - Team Chat channels, custom-named human/AI identities, atomic channel membership, message posting, and bounded time-filtered history reads
 - task creation and task updates
@@ -106,14 +106,14 @@ python -m pip install -r requirements.txt
 ## Required Environment Variables
 
 ```bash
-export REPLOFY_OS_BASE_URL="http://localhost:4000"
+export REPLOFY_OS_BASE_URL="http://localhost:4100"
 export REPLOFY_OS_API_KEY="ros_live_replace_me"
 ```
 
 PowerShell:
 
 ```powershell
-$env:REPLOFY_OS_BASE_URL = "http://localhost:4000"
+$env:REPLOFY_OS_BASE_URL = "http://localhost:4100"
 $env:REPLOFY_OS_API_KEY = "ros_live_replace_me"
 ```
 
@@ -183,7 +183,7 @@ Example MCP client entry:
       "command": "python",
       "args": ["./mcp/replofy_os_mcp_server.py"],
       "env": {
-        "REPLOFY_OS_BASE_URL": "http://localhost:4000",
+        "REPLOFY_OS_BASE_URL": "http://localhost:4100",
         "REPLOFY_OS_API_KEY": "ros_live_replace_me"
       }
     }

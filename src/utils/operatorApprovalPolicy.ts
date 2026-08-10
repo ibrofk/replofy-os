@@ -1,4 +1,4 @@
-import { ApprovalAction, OperatorApprovalMode } from '../types';
+import type { ApprovalAction, OperatorApprovalMode } from '../types.js';
 
 const APPROVAL_REQUIRED_ACTIONS: ReadonlySet<ApprovalAction> = new Set([
   'send',

@@ -18,6 +18,8 @@ import {
   teamChatParticipant,
 } from './db/schema.js';
 import type { WorkspaceActor } from './execution/tasks.js';
+import { pickProvided } from './validation.js';
+import { operatorActionRequiresApproval } from '../utils/operatorApprovalPolicy.js';
 
 const memoryScopes = ['global', 'operator', 'hub', 'goal', 'artifact', 'work_order', 'checkin'] as const;
 const memoryTypes = ['fact', 'preference', 'decision', 'style', 'constraint', 'lesson', 'avoid', 'source_note', 'workflow_rule'] as const;
@@ -241,6 +243,25 @@ function serializeApproval(row: typeof operatorApproval.$inferSelect) {
   };
 }
 
+function serializeContextPack(row: typeof operatorContextPack.$inferSelect) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    scope: row.scope,
+    scopeId: row.scopeId,
+    sourceIds: row.sourceIds,
+    sourceSnapshots: row.sourceSnapshots,
+    instructions: row.instructions,
+    constraints: row.constraints,
+    expectedUse: row.expectedUse,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    authorId: row.createdByUserId,
+    companyId: row.workspaceId,
+  };
+}
+
 async function assertMemoryScope(
   database: PostgresDatabase,
   actor: WorkspaceActor,
@@ -396,43 +417,58 @@ export async function updateOperatorMemory(
 ) {
   const id = parse(z.string().uuid(), memoryId);
   const data = parse(memoryUpdateSchema, input);
+  const patch = pickProvided(input, data);
   const current = await database.select().from(operatorMemory).where(and(
     eq(operatorMemory.id, id),
     eq(operatorMemory.workspaceId, actor.workspaceId),
   )).limit(1);
   if (!current[0]) throw new OperatorRuntimeError('Memory not found.', 404);
-  const scope = data.scope ?? current[0].scope;
-  const scopeId = data.scopeId !== undefined ? data.scopeId : current[0].scopeId;
-  const content = data.content ?? current[0].content;
+  const scope = patch.scope ?? current[0].scope;
+  const scopeId = patch.scopeId !== undefined ? patch.scopeId : current[0].scopeId;
+  const content = patch.content ?? current[0].content;
   await assertMemoryScope(database, actor, scope, scopeId);
   await assertMemoryDuplicateFree(database, actor, scope, scopeId, content, id);
   await assertMemorySources(
     database,
     actor,
-    data.sourceCheckInId !== undefined ? data.sourceCheckInId : current[0].sourceCheckinId,
-    data.sourceOutputId !== undefined ? data.sourceOutputId : current[0].sourceOutputId,
+    patch.sourceCheckInId !== undefined ? patch.sourceCheckInId : current[0].sourceCheckinId,
+    patch.sourceOutputId !== undefined ? patch.sourceOutputId : current[0].sourceOutputId,
   );
   const rows = await database
     .update(operatorMemory)
     .set({
-      ...(data.scope !== undefined && { scope: data.scope }),
-      ...(data.scopeId !== undefined && { scopeId: data.scopeId }),
-      ...(data.memoryType !== undefined && { memoryType: data.memoryType }),
-      ...(data.state !== undefined && { state: data.state }),
-      ...(data.content !== undefined && { content: data.content }),
-      ...(data.confidence !== undefined && { confidence: data.confidence }),
-      ...(data.sourceCheckInId !== undefined && { sourceCheckinId: data.sourceCheckInId }),
-      ...(data.sourceOutputId !== undefined && { sourceOutputId: data.sourceOutputId }),
-      ...(data.pinned !== undefined && { pinned: data.pinned }),
-      ...(data.state === 'pinned' && { pinned: true }),
-      ...(data.expiresAt !== undefined && { expiresAt: date(data.expiresAt) }),
-      ...(data.source !== undefined && { source: data.source }),
-      ...(data.sourceMetadata !== undefined && { sourceMetadata: data.sourceMetadata }),
+      ...(patch.scope !== undefined && { scope: patch.scope }),
+      ...(patch.scopeId !== undefined && { scopeId: patch.scopeId }),
+      ...(patch.memoryType !== undefined && { memoryType: patch.memoryType }),
+      ...(patch.state !== undefined && { state: patch.state }),
+      ...(patch.content !== undefined && { content: patch.content }),
+      ...(patch.confidence !== undefined && { confidence: patch.confidence }),
+      ...(patch.sourceCheckInId !== undefined && { sourceCheckinId: patch.sourceCheckInId }),
+      ...(patch.sourceOutputId !== undefined && { sourceOutputId: patch.sourceOutputId }),
+      ...(patch.pinned !== undefined && { pinned: patch.pinned }),
+      ...(patch.state === 'pinned' && { pinned: true }),
+      ...(patch.expiresAt !== undefined && { expiresAt: date(patch.expiresAt) }),
+      ...(patch.source !== undefined && { source: patch.source }),
+      ...(patch.sourceMetadata !== undefined && { sourceMetadata: patch.sourceMetadata }),
       updatedAt: new Date(),
     })
     .where(and(eq(operatorMemory.id, id), eq(operatorMemory.workspaceId, actor.workspaceId)))
     .returning();
   return serializeMemory(rows[0]);
+}
+
+export async function deleteOperatorMemory(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  memoryId: string,
+) {
+  const id = parse(z.string().uuid(), memoryId);
+  const rows = await database.delete(operatorMemory).where(and(
+    eq(operatorMemory.id, id),
+    eq(operatorMemory.workspaceId, actor.workspaceId),
+  )).returning({ id: operatorMemory.id });
+  if (!rows[0]) throw new OperatorRuntimeError('Memory not found.', 404);
+  return { id: rows[0].id, deleted: true as const };
 }
 
 export async function transitionOperatorMemory(
@@ -471,22 +507,35 @@ export async function listOperatorContextPacks(
     .where(eq(operatorContextPack.workspaceId, actor.workspaceId))
     .orderBy(desc(operatorContextPack.updatedAt))
     .limit(100);
-  return rows.map((row) => ({
-    id: row.id,
-    title: row.title,
-    description: row.description,
-    scope: row.scope,
-    scopeId: row.scopeId,
-    sourceIds: row.sourceIds,
-    sourceSnapshots: row.sourceSnapshots,
-    instructions: row.instructions,
-    constraints: row.constraints,
-    expectedUse: row.expectedUse,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    authorId: row.createdByUserId,
-    companyId: row.workspaceId,
-  }));
+  return rows.map(serializeContextPack);
+}
+
+export async function getOperatorContextPack(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  contextPackId: string,
+) {
+  const id = parse(z.string().uuid(), contextPackId);
+  const rows = await database.select().from(operatorContextPack).where(and(
+    eq(operatorContextPack.id, id),
+    eq(operatorContextPack.workspaceId, actor.workspaceId),
+  )).limit(1);
+  if (!rows[0]) throw new OperatorRuntimeError('Context pack not found.', 404);
+  return serializeContextPack(rows[0]);
+}
+
+export async function deleteOperatorContextPack(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  contextPackId: string,
+) {
+  const id = parse(z.string().uuid(), contextPackId);
+  const rows = await database.delete(operatorContextPack).where(and(
+    eq(operatorContextPack.id, id),
+    eq(operatorContextPack.workspaceId, actor.workspaceId),
+  )).returning({ id: operatorContextPack.id });
+  if (!rows[0]) throw new OperatorRuntimeError('Context pack not found.', 404);
+  return { id: rows[0].id, deleted: true as const };
 }
 
 export async function createOperatorContextPack(
@@ -533,6 +582,52 @@ export async function submitOperatorCheckin(
   return serializeCheckin(rows[0]);
 }
 
+export async function listOperatorCheckins(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  query: Record<string, unknown> = {},
+) {
+  const deskId = z.string().uuid().optional().safeParse(query.operatorDeskId);
+  const workOrderId = z.string().uuid().optional().safeParse(query.workOrderId);
+  if (!deskId.success || !workOrderId.success) {
+    throw new OperatorRuntimeError('Check-in filters are invalid.', 400);
+  }
+  const rows = await database.select().from(operatorCheckin).where(and(
+    eq(operatorCheckin.workspaceId, actor.workspaceId),
+    deskId.data ? eq(operatorCheckin.operatorDeskId, deskId.data) : undefined,
+    workOrderId.data ? eq(operatorCheckin.workOrderId, workOrderId.data) : undefined,
+  )).orderBy(desc(operatorCheckin.createdAt)).limit(200);
+  return rows.map(serializeCheckin);
+}
+
+export async function getOperatorCheckin(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  checkinId: string,
+) {
+  const id = parse(z.string().uuid(), checkinId);
+  const rows = await database.select().from(operatorCheckin).where(and(
+    eq(operatorCheckin.id, id),
+    eq(operatorCheckin.workspaceId, actor.workspaceId),
+  )).limit(1);
+  if (!rows[0]) throw new OperatorRuntimeError('Check-in not found.', 404);
+  return serializeCheckin(rows[0]);
+}
+
+export async function deleteOperatorCheckin(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  checkinId: string,
+) {
+  const id = parse(z.string().uuid(), checkinId);
+  const rows = await database.delete(operatorCheckin).where(and(
+    eq(operatorCheckin.id, id),
+    eq(operatorCheckin.workspaceId, actor.workspaceId),
+  )).returning({ id: operatorCheckin.id });
+  if (!rows[0]) throw new OperatorRuntimeError('Check-in not found.', 404);
+  return { id: rows[0].id, deleted: true as const };
+}
+
 export async function listOperatorOutputs(
   database: PostgresDatabase,
   actor: WorkspaceActor,
@@ -567,6 +662,20 @@ export async function getOperatorOutput(
   )).limit(1);
   if (!rows[0]) throw new OperatorRuntimeError('Output not found.', 404);
   return serializeOutput(rows[0]);
+}
+
+export async function deleteOperatorOutput(
+  database: PostgresDatabase,
+  actor: WorkspaceActor,
+  outputId: string,
+) {
+  const id = parse(z.string().uuid(), outputId);
+  const rows = await database.delete(operatorOutput).where(and(
+    eq(operatorOutput.id, id),
+    eq(operatorOutput.workspaceId, actor.workspaceId),
+  )).returning({ id: operatorOutput.id });
+  if (!rows[0]) throw new OperatorRuntimeError('Output not found.', 404);
+  return { id: rows[0].id, deleted: true as const };
 }
 
 export async function submitOperatorOutput(
@@ -650,15 +759,19 @@ export async function submitOperatorOutput(
     if (desk.approvalMode !== 'draft_only') {
       for (const targetHub of enabledDestinations) {
         const riskLevel = targetHub === 'team-chat-messages' ? 'medium' : 'low';
-        const autoWrite = desk.approvalMode === 'safe_auto_write'
-          && riskLevel === 'low'
-          && supportedWriteBackDestinations.has(targetHub);
+        const approvalAction = targetHub === 'operator-memories' ? 'remember'
+          : targetHub === 'team-chat-messages' ? 'send'
+            : 'create';
+        const autoWrite = supportedWriteBackDestinations.has(targetHub) && (
+          (desk.approvalMode === 'action_based' && !operatorActionRequiresApproval(approvalAction))
+          || (desk.approvalMode === 'safe_auto_write' && riskLevel === 'low')
+        );
         const injectionRows = await transaction.insert(operatorInjection).values({
           workspaceId: actor.workspaceId,
           createdByUserId: actor.userId,
           outputId: output.id,
           targetHub,
-          action: targetHub === 'operator-memories' ? 'remember' : 'create',
+          action: approvalAction === 'send' ? 'create' : approvalAction,
           riskLevel,
           status: autoWrite ? 'proposed' : 'pending_approval',
         }).returning();
@@ -688,9 +801,7 @@ export async function submitOperatorOutput(
           title: `Approve ${targetHub}: ${data.title}`,
           summary: data.summary,
           targetHub,
-          action: targetHub === 'operator-memories' ? 'remember'
-            : targetHub === 'team-chat-messages' ? 'send'
-              : 'create',
+          action: approvalAction,
           riskLevel,
           status: 'pending',
           writeBackStatus: 'pending',

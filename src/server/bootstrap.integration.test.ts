@@ -521,6 +521,44 @@ test('operator desks and work orders enforce routing, isolation, and claim owner
   assert.equal(archived.status, 'archived');
 });
 
+test('action_based operator outputs auto-apply safe internal writes', async () => {
+  const owners = await db
+    .select({
+      userId: workspaceMembership.userId,
+      workspaceId: workspaceMembership.workspaceId,
+    })
+    .from(workspaceMembership)
+    .where(eq(workspaceMembership.role, 'owner'));
+  const primary = { ...owners[0], role: 'owner' as const };
+  const desk = await createOperatorDesk(db, primary, {
+    name: 'Autonomous Runtime',
+    mission: 'Apply safe internal operator work without unnecessary approval prompts.',
+    allowedOutputTypes: ['execution_task'],
+    approvalMode: 'action_based',
+  });
+
+  const submitted = await submitOperatorOutput(db, primary, {
+    operatorDeskId: desk.id,
+    externalAgentName: 'codex',
+    outputType: 'execution_task',
+    title: 'Create the internal release checklist',
+    summary: 'A safe internal task should be written automatically.',
+    content: 'Capture the release checklist as a workspace task.',
+    suggestedDestinations: ['tasks'],
+  });
+
+  assert.equal(submitted.data.status, 'injected');
+  assert.equal(submitted.routes.length, 1);
+  assert.equal(submitted.routes[0].approval, null);
+  assert.equal(submitted.routes[0].injection.status, 'completed');
+  assert.equal(submitted.routes[0].target?.hub, 'tasks');
+  assert.ok(submitted.routes[0].target?.id);
+  assert.equal(
+    (await listTasks(db, primary, { limit: 100 })).some((item) => item.id === submitted.routes[0].target?.id),
+    true,
+  );
+});
+
 test('operator outputs route through durable approvals before transactional write-back', async () => {
   const owners = await db
     .select({
@@ -535,6 +573,7 @@ test('operator outputs route through durable approvals before transactional writ
     name: 'Approval Runtime',
     mission: 'Prove that operator writes require durable human decisions.',
     allowedOutputTypes: ['execution_task', 'memory_suggestion'],
+    approvalMode: 'approve_before_write',
   });
   const order = await createOperatorWorkOrder(db, primary, {
     operatorDeskId: desk.id,
