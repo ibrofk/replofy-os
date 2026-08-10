@@ -343,7 +343,7 @@ jobs:
           pg_dump "$prior_url" --format=custom --no-owner --no-privileges --file="$prior_dump"
           DATABASE_URL="$prior_url" npx tsx src/server/migrate.ts
           upgraded_latest="$(psql "$prior_url" --tuples-only --no-align \
-            --command="SELECT (to_regclass('public.feedback') IS NOT NULL)::text;")"
+            --command="SELECT (to_regclass('public.ai_agent_profile_workspace_id_id_uidx') IS NOT NULL)::text;")"
           echo "upgraded_latest=$upgraded_latest"
           test "$upgraded_latest" = 'true'
           upgraded_workspace="$(psql "$prior_url" --tuples-only --no-align \
@@ -358,7 +358,7 @@ jobs:
           docker exec "$postgres_container" createdb --maintenance-db=replofy_test --username=replofy "$prior_database"
           pg_restore --dbname="$prior_url" --no-owner --no-privileges --exit-on-error --single-transaction "$prior_dump"
           rollback_latest="$(psql "$prior_url" --tuples-only --no-align \
-            --command="SELECT (to_regclass('public.feedback') IS NULL)::text;")"
+            --command="SELECT (to_regclass('public.ai_agent_profile_workspace_id_id_uidx') IS NULL)::text;")"
           echo "rollback_latest=$rollback_latest"
           test "$rollback_latest" = 'true'
           rollback_workspace="$(psql "$prior_url" --tuples-only --no-align \
