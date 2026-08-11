@@ -24,6 +24,31 @@ test('secure cookies follow the public URL unless explicitly overridden', () => 
   }).secureCookies, false);
 });
 
+test('production rejects public HTTP or insecure-cookie deployments', () => {
+  assert.throws(
+    () => loadServerConfig({
+      ...required,
+      NODE_ENV: 'production',
+      REPLOFY_SERVER_URL: 'http://replofy.example.com',
+    }),
+    /production deployments must use an HTTPS URL and secure cookies/,
+  );
+  assert.throws(
+    () => loadServerConfig({
+      ...required,
+      NODE_ENV: 'production',
+      REPLOFY_SERVER_URL: 'https://replofy.example.com',
+      REPLOFY_SECURE_COOKIES: 'false',
+    }),
+    /production deployments must use an HTTPS URL and secure cookies/,
+  );
+  assert.equal(loadServerConfig({
+    ...required,
+    NODE_ENV: 'production',
+    REPLOFY_SERVER_URL: 'https://replofy.example.com',
+  }).secureCookies, true);
+});
+
 test('asset storage defaults to filesystem and validates S3 configuration', () => {
   assert.equal(loadServerConfig(required).assetStore, 'filesystem');
   assert.throws(

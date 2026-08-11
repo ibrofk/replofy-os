@@ -42,14 +42,17 @@ export REPLOFY_CHATGPT_APP_WIDGET_DOMAIN="https://your-replofy-os-domain.com"
 If ChatGPT/Codex OAuth reauthentication is blocked, the hosted MCP endpoint can use a server-side Replofy API key as the tool credential. Generate a key from Replofy OS settings first, then enable one of these modes:
 
 ```bash
-# API-key mode advertises MCP tools as no-auth and injects this key server-side.
+# API-key mode may advertise MCP tools as no-auth and inject this key server-side
+# only when fallback is explicitly enabled.
 export REPLOFY_CHATGPT_APP_AUTH_MODE="api-key"
 export REPLOFY_CHATGPT_APP_API_KEY="ros_live_replace_me"
+export REPLOFY_CHATGPT_APP_API_KEY_FALLBACK="true"
 
-# Hybrid mode still advertises OAuth, but falls back to the server key when no
-# Authorization or x-api-key header is sent.
+# Hybrid mode still advertises OAuth and can fall back to the server key only
+# when the same explicit opt-in is set.
 export REPLOFY_CHATGPT_APP_AUTH_MODE="hybrid"
 export REPLOFY_CHATGPT_APP_API_KEY="ros_live_replace_me"
+export REPLOFY_CHATGPT_APP_API_KEY_FALLBACK="true"
 ```
 
 You can also keep `REPLOFY_CHATGPT_APP_AUTH_MODE="oauth"` and explicitly allow the fallback:
@@ -67,7 +70,7 @@ $env:REPLOFY_CHATGPT_APP_AUTH_MODE = "api-key"
 $env:REPLOFY_CHATGPT_APP_API_KEY = "ros_live_replace_me"
 ```
 
-Use the narrowest key scopes that work for the tools you need. Server-side key modes are intended for controlled internal connectors because anyone who can reach the endpoint can exercise the advertised tools through that configured key.
+Use the narrowest key scopes that work for the tools you need. Keep fallback disabled for public deployments; when explicitly enabled, anyone who can reach the endpoint can exercise the advertised tools through that configured key. Set `REPLOFY_CHATGPT_APP_ALLOWED_ORIGINS` to the exact browser origins that may call the endpoint.
 
 Inspector:
 

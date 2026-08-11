@@ -110,6 +110,11 @@ for (const [lockPath, lockEntry] of Object.entries(lock.packages || {})) {
   scanned += 1;
   const values = licenseValues(metadata);
 
+  if (typeof override?.spdx === 'string') {
+    values.splice(0, values.length, override.spdx.trim());
+    metadataFallbacks.push(`${name}@${version} (explicit override: ${override.evidence})`);
+  }
+
   if (values.length === 0) {
     const licenseFile = findLicenseFile(packageDirectory);
     if (licenseFile) {

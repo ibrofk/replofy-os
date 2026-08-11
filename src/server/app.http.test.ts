@@ -106,6 +106,14 @@ test('standalone HTTP routes enforce session/workspace boundaries and expose the
   let response = await fetch(`${baseUrl}/api/workspaces`);
   assert.equal(response.status, 401);
 
+  response = await fetch(`${baseUrl}/api/workspaces`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{"broken":',
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: 'Malformed JSON request body.' });
+
   currentSession = {
     user: { id: 'user-http-test', email: 'owner@example.com', name: 'HTTP Owner' },
     session: { id: 'session-http-test', activeWorkspaceId },

@@ -240,19 +240,9 @@ function isHybridAuthMode() {
   return getChatGptAuthMode() === 'hybrid';
 }
 
-function isApiKeyAuthMode() {
-  return getChatGptAuthMode() === 'api-key';
-}
-
 function allowsServerApiKeyFallback() {
   const explicitFallback = process.env[CHATGPT_API_KEY_FALLBACK_ENV]?.trim().toLowerCase();
-  return (
-    isApiKeyAuthMode() ||
-    isHybridAuthMode() ||
-    explicitFallback === 'true' ||
-    explicitFallback === '1' ||
-    explicitFallback === 'yes'
-  );
+  return explicitFallback === 'true' || explicitFallback === '1' || explicitFallback === 'yes';
 }
 
 function logMcpAuthEvent(event: string, details: Record<string, unknown>) {
@@ -273,7 +263,9 @@ function scopesForOAuthPrompt(scopes: ApiKeyScope[]) {
 
 function toolConfig<T extends Record<string, unknown>>(config: T, scopes: ApiKeyScope[] = []): T {
   const meta = config._meta && typeof config._meta === 'object' ? (config._meta as Record<string, unknown>) : {};
-  const advertisedScopes = isApiKeyAuthMode() && process.env[CHATGPT_API_KEY_ENV]?.trim() ? [] : scopesForOAuthPrompt(scopes);
+  const advertisedScopes = allowsServerApiKeyFallback() && process.env[CHATGPT_API_KEY_ENV]?.trim()
+    ? []
+    : scopesForOAuthPrompt(scopes);
 
   if (advertisedScopes.length === 0) {
     const securitySchemes = [{ type: 'noauth' }];
@@ -2510,8 +2502,39 @@ export function createReplofyChatGptMcpServer(headers: HeaderBag = {}) {
   return server;
 }
 
-function setMcpCorsHeaders(res: McpHttpResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function getMcpAllowedOrigins() {
+  const configured = process.env.REPLOFY_CHATGPT_APP_ALLOWED_ORIGINS?.trim();
+  if (configured) {
+    return new Set(configured.split(',').map((origin) => origin.trim().replace(/\/+$/, '')).filter(Boolean));
+  }
+
+  const origins = new Set([
+    'https://chatgpt.com',
+    'https://chat.openai.com',
+    'http://localhost:4000',
+    'http://localhost:4100',
+  ]);
+  for (const origin of (process.env.REPLOFY_TRUSTED_ORIGINS || '').split(',')) {
+    const normalized = origin.trim().replace(/\/+$/, '');
+    if (normalized) origins.add(normalized);
+  }
+  const widgetDomain = process.env.REPLOFY_CHATGPT_APP_WIDGET_DOMAIN?.trim();
+  if (widgetDomain) {
+    try {
+      origins.add(new URL(widgetDomain).origin);
+    } catch {
+      // Invalid widget origins are handled by the application configuration.
+    }
+  }
+  return origins;
+}
+
+function setMcpCorsHeaders(res: McpHttpResponse, req: McpHttpRequest) {
+  const requestOrigin = getHeaderValue(req.headers, 'origin')?.trim().replace(/\/+$/, '');
+  if (requestOrigin && getMcpAllowedOrigins().has(requestOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, DELETE, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
@@ -2633,7 +2656,7 @@ async function writeMcpResponse(res: McpHttpResponse, response: Response, rpcMet
 
 export async function handleReplofyMcpRequest(req: McpHttpRequest, res: McpHttpResponse, body?: unknown) {
   const method = req.method?.toUpperCase() || 'GET';
-  setMcpCorsHeaders(res);
+  setMcpCorsHeaders(res, req);
   const url = new URL(req.url || MCP_PATH, 'http://localhost');
   const rpcMethod =
     body && typeof body === 'object' && 'method' in body && typeof (body as { method?: unknown }).method === 'string'

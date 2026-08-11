@@ -6,7 +6,7 @@ export default defineConfig({
   schema: './src/server/db/schema.ts',
   out: './drizzle',
   dbCredentials: {
-    url: process.env.DATABASE_URL || 'postgres://replofy:replofy@127.0.0.1:5432/replofy',
+    url: process.env.DATABASE_URL || 'postgres://replofy:replofy-local-change-me@127.0.0.1:5432/replofy',
   },
   migrations: {
     schema: 'replofy_meta',
